@@ -1,0 +1,44 @@
+{
+ "cell": [
+  96,
+  88
+ ],
+ "rows": {
+  "idle": {
+   "row": 0,
+   "frames": 5
+  },
+  "walk": {
+   "row": 1,
+   "frames": 5
+  },
+  "climb": {
+   "row": 2,
+   "frames": 5
+  },
+  "axe": {
+   "row": 3,
+   "frames": 5
+  },
+  "rope": {
+   "row": 4,
+   "frames": 5
+  },
+  "dig": {
+   "row": 5,
+   "frames": 4
+  },
+  "exhausted": {
+   "row": 6,
+   "frames": 5
+  },
+  "fall": {
+   "row": 7,
+   "frames": 4
+  },
+  "injured": {
+   "row": 8,
+   "frames": 4
+  }
+ }
+}

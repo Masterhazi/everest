@@ -1,0 +1,5 @@
+/target
+/shots*
+/dist
+/deliver
+*.log

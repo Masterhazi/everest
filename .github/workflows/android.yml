@@ -124,5 +124,5 @@ jobs:
         if: always()
         run: |
           [ -f emu_tail.txt ] || echo "no emulator output" > emu_tail.txt
-          msg=$(tail -c 7000 emu_tail.txt | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')
+          msg=$(head -c 3800 emu_tail.txt | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')
           echo "::warning title=emulator log::$msg"

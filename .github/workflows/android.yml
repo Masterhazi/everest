@@ -36,6 +36,8 @@ jobs:
           keytool -genkeypair -v -keystore "$RUNNER_TEMP/everest.keystore" -alias androiddebugkey \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass android -keypass android -dname "CN=Everest,O=Everest,C=IN"
+          echo "CARGO_APK_RELEASE_KEYSTORE=$RUNNER_TEMP/everest.keystore" >> "$GITHUB_ENV"
+          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |

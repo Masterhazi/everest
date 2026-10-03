@@ -43,9 +43,19 @@ jobs:
         run: |
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
-          cargo apk build --release --lib
+          ls "$ANDROID_HOME/build-tools" "$ANDROID_HOME/platforms" "$ANDROID_HOME/ndk" || true
+          set -o pipefail
+          cargo apk build --release --lib 2>&1 | tee build.log
           mkdir -p out && cp target/release/apk/*.apk out/everest.apk
           ls -la out
+
+      - name: Report build error
+        if: failure()
+        run: |
+          # surface the end of the log as an annotation (readable through the API)
+          tail -c 6000 build.log 2>/dev/null | grep -v "^\s*Compiling" | tail -60 > tail.txt || echo "no build.log" > tail.txt
+          msg=$(sed -e 's/%/%25/g' tail.txt | sed -e ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=build tail::$msg"
 
       - uses: actions/upload-artifact@v4
         with:

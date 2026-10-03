@@ -14,7 +14,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "bevy_asset", "bevy_audio", "wav", "bevy_color", "bevy_core_pipeline", "bevy_log",
   "bevy_render", "bevy_sprite", "bevy_state", "bevy_text", "default_font",
   "bevy_window", "bevy_winit", "png", "x11", "webgl2",
-  "android-native-activity",
+  "android-native-activity", "android_shared_stdcxx",
 ] }
 rand = "0.8"
 

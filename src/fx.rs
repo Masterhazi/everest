@@ -3,9 +3,10 @@
 
 use crate::controls::view_area;
 use crate::hero::{HState, Hero};
-use crate::level::WORLD_TOP;
+use crate::hazards::Hazards;
 use crate::story::{Stage, Story};
 use crate::{VIEW_H, VIEW_W};
+const WORLD_TOP: f32 = 1200.0;
 use bevy::audio::{AudioSinkPlayback, Volume};
 use bevy::prelude::*;
 use bevy::render::camera::{Projection, ScalingMode};
@@ -49,6 +50,8 @@ pub struct Mood {
     pub shake: f32,
     pub flash: f32,
     pub vignette: f32,
+    pub night: f32,
+    pub dizzy: f32,
 }
 
 // ------------------------------------------------------------------ captions
@@ -104,7 +107,7 @@ pub struct Flake {
 
 #[derive(Resource, Default)]
 pub struct CamState {
-    y: f32,
+    p: Vec2,
     init: bool,
 }
 
@@ -128,14 +131,14 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
         Transform::from_xyz(VIEW_W / 2.0, VIEW_H / 2.0, 999.0),
     ));
     commands.insert_resource(Sounds {
-        whumpf: assets.load("audio/whumpf.wav"),
-        rumble: assets.load("audio/rumble.wav"),
-        crunch: assets.load("audio/crunch.wav"),
-        chink: assets.load("audio/chink.wav"),
-        gust: assets.load("audio/gust.wav"),
-        chime: assets.load("audio/chime.wav"),
+        whumpf: assets.load("audio/whumpf.ogg"),
+        rumble: assets.load("audio/rumble.ogg"),
+        crunch: assets.load("audio/crunch.ogg"),
+        chink: assets.load("audio/chink.ogg"),
+        gust: assets.load("audio/gust.ogg"),
+        chime: assets.load("audio/chime.ogg"),
     });
-    for (c, file) in [(Chan::Wind, "audio/wind.wav"), (Chan::Breath, "audio/breath.wav"), (Chan::Heart, "audio/heart.wav"), (Chan::Memory, "audio/memory.wav")] {
+    for (c, file) in [(Chan::Wind, "audio/wind.ogg"), (Chan::Breath, "audio/breath.ogg"), (Chan::Heart, "audio/heart.ogg"), (Chan::Memory, "audio/memory.ogg")] {
         commands.spawn((c, ChanVol(0.0), AudioPlayer::new(assets.load(file)), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
     }
 
@@ -173,44 +176,47 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
     }
 }
 
-pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, mut hq: Query<&mut Hero>, time: Res<Time>) {
+pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, hz: Res<Hazards>, mut hq: Query<&mut Hero>, time: Res<Time>) {
     let Ok(mut h) = hq.single_mut() else { return };
     let dt = time.delta_secs().min(0.05);
     let fatigue = 1.0 - h.stamina / 100.0;
-    let climbing = matches!(h.state, HState::Climb { .. });
-    let high = h.ledge >= 2;
+    let climbing = h.state == HState::Move && h.moving && h.pos.y > 0.0;
 
-    let mut wind = 0.35 + if high { 0.2 } else { 0.0 };
-    let mut wind_x = -22.0 - h.pos.y * 0.03;
-    if story.gust_warn {
-        wind += 0.25;
-        wind_x = -90.0;
-    }
-    if story.gust_active {
-        wind += 0.45;
-        wind_x = -230.0;
-    }
-    let mut breath = (fatigue * 0.9 + if climbing { 0.15 } else { 0.0 }).min(1.0);
-    let mut heart = 0.0;
+    let mut wind = 0.35 + (h.pos.y / 1200.0).min(0.3);
+    let mut wind_x = -22.0 - h.pos.y * 0.04;
+    let mut breath = (fatigue * 0.9 + if climbing { 0.1 } else { 0.0 } + hz.dizzy * 0.5).min(1.0);
+    let mut heart: f32 = 0.0;
     let mut memory = 0.0;
     let mut dark = 0.0;
-    let mut sunset = 0.0;
-    match story.stage {
-        Stage::Whumpf => {
-            wind = 0.04; // the silence before
-            heart = 0.5;
-        }
-        Stage::Slide => {
-            wind = 0.3;
-            heart = 0.6;
-            wind_x = -140.0;
-        }
-        Stage::Buried => {
+    if hz.avalanche_warning() {
+        wind = 0.04; // the silence before
+        heart = 0.5;
+    } else if hz.avalanche_running() {
+        wind = 0.3;
+        heart = 0.6;
+        wind_x = -140.0;
+    }
+    if hz.ice_warn > 0.0 || hz.rock_warn > 0.0 {
+        heart = heart.max(0.35);
+    }
+    match h.state {
+        HState::Buried => {
             wind = 0.03;
             breath = 0.95;
             heart = 0.85;
-            dark = 0.94 - (8 - story.dig_left).max(0) as f32 / 8.0 * 0.45;
+            let total = if story.coat_pending() { 8.0 } else { 6.0 };
+            dark = 0.94 - (1.0 - h.dig_left as f32 / total).clamp(0.0, 1.0) * 0.45;
         }
+        HState::Crevasse { left } => {
+            wind = 0.08;
+            heart = 0.6;
+            breath = breath.max(0.6);
+            dark = 0.35 + left as f32 * 0.04;
+        }
+        HState::Down { .. } | HState::Rise { .. } => breath = 1.0,
+        _ => {}
+    }
+    match story.stage {
         Stage::CoatHold | Stage::Voice => {
             wind = 0.1;
             breath = 0.3;
@@ -221,24 +227,19 @@ pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, mut hq: Query<&mut
             wind = 0.16;
             breath = 0.25;
             memory = 0.5;
-            sunset = (story.t / 5.0).min(1.0);
             wind_x = -15.0;
         }
         Stage::End => {
             wind = 0.14; // the world keeps going after the picture ends
             breath = 0.0;
             memory = 0.45;
-            sunset = 1.0;
             dark = (story.t / 3.0).min(1.0);
         }
         _ => {}
     }
-    if matches!(h.state, HState::Down { .. } | HState::Rise { .. }) {
-        breath = 1.0;
-    }
     if h.just_fell {
         h.just_fell = false;
-        mood.flash = 0.75;
+        mood.flash = 0.45;
         mood.shake = mood.shake.max(0.35);
     }
     mood.wind = wind;
@@ -246,15 +247,14 @@ pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, mut hq: Query<&mut
     mood.heart = heart;
     mood.memory = memory;
     mood.dark = dark;
-    mood.sunset = sunset;
+    mood.sunset = hz.dawn;
+    mood.night = hz.night;
+    mood.dizzy = hz.dizzy;
     mood.wind_x = mood.wind_x + (wind_x - mood.wind_x) * (dt * 3.0).min(1.0);
-    mood.flash = (mood.flash - dt * 0.45).max(0.0);
+    mood.flash = (mood.flash - dt * 0.9).max(0.0);
     mood.shake = (mood.shake - dt * 0.5).max(0.0);
-    if story.stage == Stage::Slide && story.mass_active {
-        mood.shake = mood.shake.max(0.25);
-    }
     let hurt = matches!(h.state, HState::Down { .. } | HState::Rise { .. }) as i32 as f32;
-    mood.vignette = (0.18 + fatigue.powf(1.5) * 0.7 + hurt * 0.35).min(1.0);
+    mood.vignette = (0.18 + fatigue.powf(1.5) * 0.7 + hurt * 0.35 + hz.dizzy * 0.35).min(1.0);
 }
 
 pub fn camera_follow(
@@ -267,20 +267,22 @@ pub fn camera_follow(
     let (Ok((mut t, proj)), Ok(h)) = (cam.single_mut(), hq.single()) else { return };
     let area = view_area(proj);
     let dt = time.delta_secs().min(0.05);
-    // keep him in the lower part of the frame: the mountain is what's ahead
-    let min_y = area.height() / 2.0 - 30.0;
-    let max_y = WORLD_TOP - area.height() / 2.0 + 60.0;
-    let target = (h.pos.y + area.height() * 0.2).clamp(min_y, max_y.max(min_y));
+    // the route climbs up and to the right: keep him lower-left, the mountain ahead in view
+    let target = Vec2::new((h.pos.x + 60.0).max(area.width() / 2.0 - 20.0), (h.pos.y + area.height() * 0.18).max(area.height() / 2.0 - 30.0));
     if !st.init {
-        st.y = target;
+        st.p = target;
         st.init = true;
     }
-    st.y += (target - st.y) * (dt * 2.2).min(1.0);
+    let p = st.p;
+    st.p = p + (target - p) * (dt * 2.2).min(1.0);
     let mut rng = rand::thread_rng();
     let s = mood.shake * 6.0;
     let shake = if s > 0.05 { Vec2::new(rng.gen_range(-s..s), rng.gen_range(-s..s)) } else { Vec2::ZERO };
-    t.translation.x = VIEW_W / 2.0 + shake.x;
-    t.translation.y = st.y + shake.y;
+    t.translation.x = st.p.x + shake.x;
+    t.translation.y = st.p.y + shake.y;
+    // altitude: the world sways a little until his body adjusts
+    let sway = (time.elapsed_secs() * 1.7).sin() * 0.04 * mood.dizzy;
+    t.rotation = Quat::from_rotation_z(sway);
 }
 
 pub fn camera_locked(
@@ -299,14 +301,19 @@ pub fn camera_locked(
                 let scale = (area.width() / 360.0).max(area.height() / 780.0).max(1.0);
                 let off = (120.0 - (c.y - 320.0) * 0.08).clamp(-120.0, 120.0);
                 t.translation = Vec3::new(c.x, c.y + off * scale, z);
-                t.scale = Vec3::splat(scale);
+                t.scale = Vec3::splat(scale * 1.15);
+                t.rotation = ct.rotation;
+                let night = 1.0 - 0.75 * mood.night;
                 if o.kind == OverlayKind::BgSunset {
                     s.color = Color::srgba(1., 1., 1., mood.sunset);
+                } else {
+                    s.color = Color::srgb(night, night, night * 1.05);
                 }
             }
             _ => {
                 t.translation = c.extend(z);
-                s.custom_size = Some(area.size() + Vec2::splat(20.0));
+                t.rotation = ct.rotation;
+                s.custom_size = Some(area.size() + Vec2::splat(60.0));
                 let a = match o.kind {
                     OverlayKind::Vignette => mood.vignette,
                     OverlayKind::Dark => mood.dark,

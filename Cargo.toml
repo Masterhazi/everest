@@ -11,7 +11,7 @@ crate-type = ["rlib", "cdylib"]
 # Only what the game uses. NativeActivity on Android so a plain `cargo apk build` works.
 bevy = { version = "0.16.1", default-features = false, features = [
   "std", "async_executor", "multi_threaded",
-  "bevy_asset", "bevy_audio", "wav", "bevy_color", "bevy_core_pipeline", "bevy_log",
+  "bevy_asset", "bevy_audio", "vorbis", "bevy_color", "bevy_core_pipeline", "bevy_log",
   "bevy_render", "bevy_sprite", "bevy_state", "bevy_text", "default_font",
   "bevy_window", "bevy_winit", "png", "x11", "webgl2",
   "android-native-activity", "android_shared_stdcxx",

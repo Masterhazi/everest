@@ -1,14 +1,16 @@
 //! EVEREST — vertical slice
 //! Base Camp → first ascent → avalanche → the yellow coat → friend's voice → first checkpoint.
 //!
-//! Portrait, touch-first. Left thumb: joystick. Right thumb: contextual equipment.
-//! Desktop dev keys: arrows/WASD move, Space = ice axe, R = rope, E = dig, Q = rest.
+//! Portrait, touch-first. Left thumb: joystick. Right thumb: the five tools, always visible.
+//! Desktop dev keys: arrows/WASD move, Space = ice axe, R = rope, E = dig, L = headlamp, Q = rest.
 
 pub mod controls;
 pub mod fx;
+pub mod hazards;
 pub mod hero;
-pub mod level;
+pub mod skill;
 pub mod story;
+pub mod terrain;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
@@ -29,6 +31,7 @@ pub fn main() {
         .add_plugins(
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
+                .set(render_plugin())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Everest".into(),
@@ -43,27 +46,32 @@ pub fn main() {
                 }),
         )
         .add_systems(PreStartup, install_panic_logger)
+        .init_resource::<skill::Skill>()
         .add_plugins((
-            level::LevelPlugin,
+            terrain::TerrainPlugin,
+            hazards::HazardsPlugin,
             controls::ControlsPlugin,
             story::StoryPlugin,
             hero::HeroPlugin,
             fx::FxPlugin,
         ))
+        .add_systems(Startup, hazards::spawn_lamp_mask)
         .add_systems(
             Update,
             (
                 controls::read_input,
                 story::story_system,
                 hero::hero_system,
+                hazards::hazards_system,
+                skill::skill_system,
                 hero::animate_hero,
                 fx::mood_system,
                 fx::camera_follow,
+                hazards::hazard_visuals,
                 fx::camera_locked,
                 fx::snow_system,
                 fx::audio_mix,
                 fx::captions_system,
-                controls::update_tool_avail,
                 controls::draw_controls,
                 story::restart_system,
             )
@@ -80,4 +88,16 @@ fn install_panic_logger() {
         default(info);
     }));
     info!("everest: started");
+}
+
+/// Old phones: their Vulkan drivers are often buggy. On Android we use OpenGL ES, which every
+/// phone handles well and which loses nothing a 2D pixel-art game needs.
+fn render_plugin() -> bevy::render::RenderPlugin {
+    #[allow(unused_mut)]
+    let mut settings = bevy::render::settings::WgpuSettings::default();
+    #[cfg(target_os = "android")]
+    {
+        settings.backends = Some(bevy::render::settings::Backends::GL);
+    }
+    bevy::render::RenderPlugin { render_creation: settings.into(), ..default() }
 }

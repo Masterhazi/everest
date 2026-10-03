@@ -10,26 +10,56 @@ Portrait, touch-first, Rust + Bevy 0.16.
 
 ## Controls
 
-| Where | Phone | Desktop (for testing) |
+| | Phone | Desktop |
 |---|---|---|
-| Move / climb | Left thumb: joystick (touch anywhere in the lower-left) | Arrows or WASD |
-| Ice axe | Right side: the axe appears at ice walls | Space |
-| Rope | Right side: appears at the anchor | R |
-| Dig | Right side: appears when buried, and at the coat | E |
-| Rest | Right side: appears when he's tired | Q |
+| Move / climb | left thumb: joystick | arrows / WASD |
+| Ice axe | right column (bottom) | Space |
+| Rope | right column | R |
+| Dig | right column | E |
+| Headlamp | right column | L |
+| Rest | right column (top) | Q |
 
-Only the tools that make sense right now are shown.
+All five tools are always on screen. Nothing tells you which one fits; the mountain shows you.
 
-## What the player does
+## The mountain
 
-- **Rock walls:** push up. It costs stamina.
-- **Ice walls:** tap the **axe** to plant it, then push up to pull. The rhythm is plant → pull → recover. Without a planted axe he slowly slides down the ice.
-- **Stamina is never shown as a bar.** It comes through his breathing, the dark vignette at the screen edges, and his pace. If it runs out on a wall, he falls to the bottom. The screen flashes, he lies there, then gets up again. There's no game over. Every second fall he mutters *"Ek aur climb."*
-- **Exposed traverse (Day 1 → 2):** wind gusts are announced by the sound and the snow picking up. If he's unroped and moving when a gust hits, it knocks him back. The player can clip the **rope** to the anchor, which makes him slower but safe, or cross unroped and stop still during each gust. Either choice works.
-- **Avalanche:** a *whumpf*, sudden silence, and a crack in the slope, then about 2 seconds before it arrives. If he reaches the **leeward side of the boulder**, he's sheltered. Anywhere else, he's swept away and buried: the screen goes dark, you hear his heartbeat, and the player **digs** out. Either way, the churned snow uncovers a yellow sleeve.
-- **The coat:** he stops at it. Dig four times, he kneels, the wind drops, and he takes the coat. It's rolled on top of his pack for the rest of the game. Then the friend's voice: *"Jab toofan aaye toh bhaagte nahi… bachte hai."*
-- **Checkpoint:** he sits beneath the prayer flags, the sky turns to sunset, **DAY 3** appears, and the friend tells a memory.
-- If the player stops, nothing happens and the game waits.
+One continuous climb (no levels, no platforms): gentle snow → steep snow → rock face → ice face →
+snow bridge → the avalanche slope → under the seracs → night → ice face in the dark → steep snow →
+dawn at the first checkpoint. The micro-shape is re-randomised every run.
+
+**Falling is physics, not a checkpoint.** When he falls he slides back down the route until friction,
+his axe or his rope stops him. Snow grips, ice barely does, faces don't at all.
+
+## What each tool does where
+
+| Tool | Works | Wrong place (you'll see it) |
+|---|---|---|
+| Axe | plant on ice faces (plant → pull → recover); **self-arrest** while sliding on snow; probe snow ahead | skids off rock (sparks, lurch); barely bites ice when sliding |
+| Rope | clip at an anchor; a fall stops just below it; runs out ~300 px later | fumbles if no anchor nearby |
+| Dig | dig out when buried; uncover the coat | scoop of snow; clanks off ice/rock |
+| Headlamp | light at night | drains the battery in daylight; flickers when low |
+| Rest | recover on ground | nothing on a face |
+
+## Hazards (all announce themselves)
+
+- **Rockfall** (rock face): pebbles trickle down the line first; lean sideways (joystick left/right) out of it.
+- **Crevasse:** a faint sag in the snow. Probe it with the axe to see the cracks and cross on the edge, or fall in and axe your way out.
+- **Icefall** (seracs): a tower shivers and cracks; get out from under it.
+- **Avalanches:** *whumpf*, silence, a crack up-slope. The story one (the coat) is fixed; others are random and more likely at night or if you linger. The runout reaches past the slope. The boulder's downhill side is shelter.
+- **Altitude:** crossing a new height band makes him dizzy for a few seconds (world sways, reactions lag). Then he acclimatises.
+- **Night:** darkness except the headlamp's pool of light.
+
+## Adaptive difficulty
+
+`src/skill.rs`: a running skill estimate from what the player does (clean self-arrests, dodges,
+escapes, probing → up; exhaustion falls, hits, being swept → down). Early observations weigh more
+(silent calibration on the first slopes). Difficulty drifts toward it and tunes warning times,
+hazard frequency, avalanche odds, slip chance and stamina drain. Story beats never change.
+
+## Light on old phones
+
+Android uses OpenGL ES (old phones' Vulkan drivers are often buggy). Audio is OGG Vorbis (q6).
+The APK carries only the Bevy parts the game uses.
 
 ## Run it
 
@@ -67,13 +97,16 @@ Building locally instead needs the Android SDK + NDK:
 
 ```
 src/lib.rs        app setup, system order
-src/level.rs      the mountain: ledges, walls, props (all positions are here)
+src/terrain.rs    the mountain: one continuous path + mesh, props
 src/hero.rs       movement, climbing, axe rhythm, stamina, falls
-src/story.rs      the beats: cross, rope, gusts, avalanche, coat, voice, checkpoint
+src/story.rs      the beats: cross, coat avalanche, voice, dawn checkpoint
+src/hazards.rs    rockfall, crevasse, icefall, random avalanches, altitude, night
+src/skill.rs      adaptive difficulty
 src/fx.rs         camera, parallax sky, snow, vignette/darkness, captions, audio mix
 src/controls.rs   touch joystick, contextual tool buttons, keyboard, test autopilot
 tools/slice.py    cuts the concept sheet into sprites (and recolours the friend's coat)
-tools/gen_assets.py  placeholder sky, rock face, avalanche, and all sounds
+tools/gen_assets.py  placeholder sky, rock face, avalanche, and all sounds (WAV; converted to OGG)
+tools/gen_assets2.py repeating textures, headlamp masks, seracs
 tools/playtest.sh automated play-through with screenshots (Linux, headless)
 ```
 

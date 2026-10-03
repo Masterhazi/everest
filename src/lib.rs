@@ -42,6 +42,7 @@ pub fn main() {
                     ..default()
                 }),
         )
+        .add_systems(PreStartup, install_panic_logger)
         .add_plugins((
             level::LevelPlugin,
             controls::ControlsPlugin,
@@ -69,4 +70,14 @@ pub fn main() {
                 .chain(),
         )
         .run();
+}
+
+/// On Android, a Rust panic goes to stderr, which nobody sees. Send it to the system log too.
+fn install_panic_logger() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        error!("EVEREST PANIC: {info}");
+        default(info);
+    }));
+    info!("everest: started");
 }

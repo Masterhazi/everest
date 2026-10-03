@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -36,17 +36,24 @@ jobs:
           keytool -genkeypair -v -keystore "$RUNNER_TEMP/everest.keystore" -alias androiddebugkey \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass android -keypass android -dname "CN=Everest,O=Everest,C=IN"
-          echo "CARGO_APK_RELEASE_KEYSTORE=$RUNNER_TEMP/everest.keystore" >> "$GITHUB_ENV"
-          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
           ls "$ANDROID_HOME/build-tools" "$ANDROID_HOME/platforms" "$ANDROID_HOME/ndk" || true
+          # cargo-apk builds + aligns; its own signing step is unreliable on new build-tools,
+          # so we sign explicitly with apksigner afterwards.
+          cargo apk build --release --lib 2>&1 | tee build.log || true
+          test -f target/release/apk/everest.apk
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          mkdir -p out
           set -o pipefail
-          cargo apk build --release --lib 2>&1 | tee build.log
-          mkdir -p out && cp target/release/apk/*.apk out/everest.apk
+          "$BT/zipalign" -f -p 4 target/release/apk/everest.apk out/aligned.apk 2>&1 | tail -2 | tee -a build.log
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/everest.keystore" --ks-pass pass:android \
+            --ks-key-alias androiddebugkey --key-pass pass:android \
+            --out out/everest.apk out/aligned.apk 2>&1 | tee -a build.log
+          "$BT/apksigner" verify --print-certs out/everest.apk 2>&1 | head -3 | tee -a build.log
           ls -la out
 
       - name: Report build error

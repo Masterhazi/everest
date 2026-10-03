@@ -19,6 +19,6 @@ if adb shell pidof $PKG >/dev/null; then R="ALIVE after 30s"; else R="DEAD (cras
   adb logcat -d | grep -E "$PKG|NativeActivity|linker|dlopen" | grep -vE "AiAiEcho|PackageManager|SafetyLabel|ImsResolver" | tail -25
   echo "RESULT: $R"
 } > emu_tail.txt 2>&1
-cut -c1-240 emu_tail.txt > t && mv t emu_tail.txt
+grep -v "^\s*$" emu_tail.txt | grep -vE "\tat (android|java|com\.android)" | cut -c1-900 > t && mv t emu_tail.txt
 cat emu_tail.txt
 true

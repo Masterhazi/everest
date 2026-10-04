@@ -21,6 +21,9 @@ pub struct Sounds {
     pub chink: Handle<AudioSource>,
     pub gust: Handle<AudioSource>,
     pub chime: Handle<AudioSource>,
+    /// "Ashchhe Jamai Digombor" (The Parvathy Baul Project, SVF Music), used with permission —
+    /// the opening, muffled and distant, as if carried through the mountain
+    pub song: Handle<AudioSource>,
     pub steps_snow: Vec<Handle<AudioSource>>,
     pub steps_rock: Vec<Handle<AudioSource>>,
     pub steps_ice: Vec<Handle<AudioSource>>,
@@ -205,6 +208,7 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
         chink: assets.load("audio/chink.ogg"),
         gust: assets.load("audio/gust.ogg"),
         chime: assets.load("audio/chime.ogg"),
+        song: assets.load("audio/song_distant.ogg"),
         steps_snow: (0..3).map(|k| assets.load(format!("audio/step_snow{k}.ogg"))).collect(),
         steps_rock: (0..3).map(|k| assets.load(format!("audio/step_rock{k}.ogg"))).collect(),
         steps_ice: (0..3).map(|k| assets.load(format!("audio/step_ice{k}.ogg"))).collect(),
@@ -350,8 +354,8 @@ pub fn mood_system(
             memory = 0.45;
             dark = (story.t / 3.0).min(1.0);
             drone = 0.0;
-            bowls = 0.3;
-            lament = 0.5;
+            bowls = 0.0;
+            lament = 0.0;
         }
         _ => {}
     }

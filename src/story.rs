@@ -245,6 +245,10 @@ pub fn story_system(
         }
         Stage::End => {
             story.lock = 1.0;
+            if story.t - dt <= 0.0 {
+                // the picture goes; the song stays. Despawned if the player starts again.
+                commands.spawn((LevelEntity, AudioPlayer::new(sounds.song.clone()), PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(0.9))));
+            }
             if story.t > 5.0 && story.t - dt <= 5.0 {
                 captions.hint("tap to climb again");
             }

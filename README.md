@@ -68,7 +68,7 @@ tanpura-style drone while climbing · singing bowls when resting and at camps ·
 danger is announced · silence at the *whumpf* and when buried · a thin cold shimmer at night · a lament
 for memory moments and when the player stops for a long time.
 Natural sounds: footsteps per surface (snow / rock / ice), prayer flags near camps, serac ice creaking.
-The lament is a synthesised placeholder until real voice samples (CC0 kulning, Tibetan chant) are added.
+The lament is built from real voices (`tools/samples/`): a Tibetan overtone chant bed, a slowed female "ooh" chord, and one distant kulning call. At the very end, the opening of "Ashchhe Jamai Digombor" plays muffled and far away while the screen stays black. See CREDITS.md.
 
 ## Light on old phones
 

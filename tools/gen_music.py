@@ -246,3 +246,56 @@ def creak():
 if __name__ == '__main__':
     drone(); bowls(); tension(); night(); lament(); steps(); flags(); creak()
     print('music ok')
+
+
+# ------------------------------------------------------------------ lament from real voices
+def load(path):
+    """Decode any audio file to mono float at SR via ffmpeg."""
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', path, '-ac', '1', '-ar', str(SR), '-f', 's16le', '-'], capture_output=True, check=True).stdout
+    x = np.frombuffer(raw, np.int16).astype(float) / 32768
+    return x / (np.abs(x).max() + 1e-9)
+
+
+def repitch(x, semis):
+    """Pitch by resampling (also changes length — slower and lower, like a voice far away)."""
+    from scipy.signal import resample_poly
+    from fractions import Fraction
+    r = Fraction(2 ** (-semis / 12)).limit_denominator(64)
+    return resample_poly(x, r.numerator, r.denominator)
+
+
+def place(out, x, at, gain):
+    i = int(at * SR)
+    n = min(len(x), len(out) - i)
+    if n > 0:
+        out[i:i + n] += x[:n] * gain
+
+
+def lament_voices():
+    """Himalayan bed + Nordic call: Tibetan overtone chant underneath, a slowed female 'ooh'
+    as a chord, and one kulning call far away, echoing off the mountain."""
+    S = 'tools/samples/'
+    chant, ooh, call = load(S + 'tibetan_monks_cc0.ogg'), load(S + 'female_ooh_ccby.ogg'), load(S + 'kulning_cc0.ogg')
+    total = 40.0
+    out = np.zeros(int(SR * (total + 10)))
+    # bed: the chant, dark and low, the whole loop long
+    bed = lp(chant[int(10 * SR):int(10 * SR) + len(out)], 1400)
+    fade = np.clip(np.arange(len(bed)) / (SR * 2), 0, 1)
+    place(out, bed * fade, 0.0, 0.45)
+    # the 'ooh' slowed into a minor chord that swells and recedes
+    for at, semis, g in [(1.0, -5, 0.55), (3.0, -12, 0.45), (5.5, -8, 0.35), (21.0, -7, 0.5), (23.5, -12, 0.4), (26.0, -10, 0.3)]:
+        v = repitch(ooh, semis)
+        env = np.sin(np.pi * np.clip(np.arange(len(v)) / len(v), 0, 1)) ** 1.5
+        place(out, v * env, at, g)
+    # the kulning: once, far away, then its echo off the far wall
+    c = hp(call, 300)
+    c = c / (np.abs(c).max() + 1e-9)
+    place(out, lp(c, 5000), 12.0, 0.42)
+    place(out, lp(c, 2500), 12.0 + 0.9, 0.16)
+    out = reverb(out, 4.5, 0.55)
+    save('m_lament', loopify(out, total, 5.0), 0.75, 0.7)
+
+
+if __name__ == '__main__' and os.path.exists('tools/samples/kulning_cc0.ogg'):
+    lament_voices()
+    print('lament from voices ok')

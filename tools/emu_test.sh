@@ -9,6 +9,7 @@ sleep 3
 PID=$(adb shell pidof $PKG | tr -d '\r')
 sleep 27
 if adb shell pidof $PKG >/dev/null; then R="ALIVE after 30s"; else R="DEAD (crashed)"; fi
+if adb logcat -d | grep -q "EVEREST PANIC"; then R="$R + PANIC LOGGED"; fi
 {
   echo "RESULT: $R (pid at start: ${PID:-none})"
   echo "== crash buffer =="
@@ -21,4 +22,5 @@ if adb shell pidof $PKG >/dev/null; then R="ALIVE after 30s"; else R="DEAD (cras
 } > emu_tail.txt 2>&1
 grep -v "^\s*$" emu_tail.txt | grep -vE "\tat (android|java|com\.android)" | cut -c1-900 > t && mv t emu_tail.txt
 cat emu_tail.txt
+grep -q PANIC emu_tail.txt && exit 1
 true

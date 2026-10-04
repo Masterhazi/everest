@@ -12,6 +12,8 @@ if adb shell pidof $PKG >/dev/null; then R="ALIVE after 30s"; else R="DEAD (cras
 if adb logcat -d | grep -q "EVEREST PANIC"; then R="$R + PANIC LOGGED"; fi
 {
   echo "RESULT: $R (pid at start: ${PID:-none})"
+  echo "== panics =="
+  adb logcat -d | grep -A12 "EVEREST PANIC" | head -30
   echo "== crash buffer =="
   adb logcat -d -b crash | tail -40
   echo "== app log =="

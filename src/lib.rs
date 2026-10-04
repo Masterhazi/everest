@@ -100,7 +100,8 @@ fn install_panic_logger() {
 fn render_plugin() -> bevy::render::RenderPlugin {
     #[allow(unused_mut)]
     let mut settings = bevy::render::settings::WgpuSettings::default();
-    #[cfg(target_os = "android")]
+    // (the CI emulator's GL translator lacks sRGB surfaces, so its test build keeps Vulkan)
+    #[cfg(all(target_os = "android", not(feature = "emulator")))]
     {
         settings.backends = Some(bevy::render::settings::Backends::GL);
     }

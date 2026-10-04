@@ -103,7 +103,7 @@ jobs:
             -validity 10000 -storepass android -keypass android -dname "CN=Everest,O=Everest,C=IN"
           export CARGO_APK_RELEASE_KEYSTORE="$RUNNER_TEMP/k.keystore" CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
           export ANDROID_HOME="$ANDROID_SDK_ROOT" ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
-          cargo apk build --release --lib --target x86_64-linux-android 2>&1 | tail -5 || true
+          cargo apk build --release --lib --target x86_64-linux-android --features emulator 2>&1 | tail -5 || true
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           "$BT/zipalign" -f -p 4 target/release/apk/everest.apk aligned.apk
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/k.keystore" --ks-pass pass:android --ks-key-alias androiddebugkey \

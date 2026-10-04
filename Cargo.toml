@@ -7,6 +7,10 @@ edition = "2021"
 # rlib for desktop/web, cdylib for Android
 crate-type = ["rlib", "cdylib"]
 
+[features]
+# build for the CI Android emulator (Vulkan instead of OpenGL ES)
+emulator = []
+
 [dependencies]
 # Only what the game uses. NativeActivity on Android so a plain `cargo apk build` works.
 bevy = { version = "0.16.1", default-features = false, features = [

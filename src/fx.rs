@@ -21,6 +21,50 @@ pub struct Sounds {
     pub chink: Handle<AudioSource>,
     pub gust: Handle<AudioSource>,
     pub chime: Handle<AudioSource>,
+    pub steps_snow: Vec<Handle<AudioSource>>,
+    pub steps_rock: Vec<Handle<AudioSource>>,
+    pub steps_ice: Vec<Handle<AudioSource>>,
+}
+
+/// Play with a little random pitch so repeated sounds (footsteps) don't machine-gun.
+pub fn play_varied(commands: &mut Commands, h: &Handle<AudioSource>, vol: f32) {
+    let speed = rand::thread_rng().gen_range(0.88..1.12);
+    commands.spawn((AudioPlayer::new(h.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(vol)).with_speed(speed)));
+}
+
+/// The world camera (top part of the screen).
+#[derive(Component)]
+pub struct GameCam;
+/// The control-strip camera (whole screen, draws only the controls layer).
+#[derive(Component)]
+pub struct UiCam;
+pub const UI_LAYER: usize = 1;
+
+/// Screen split: the game is drawn above a control strip so thumbs never cover the mountain.
+#[derive(Resource, Default)]
+pub struct Layout {
+    /// control-space height (width is always 360)
+    pub h: f32,
+    /// control strip height, in control-space units
+    pub strip: f32,
+}
+
+pub fn layout_system(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut layout: ResMut<Layout>,
+    mut cam: Query<&mut Camera, With<GameCam>>,
+) {
+    let (Ok(win), Ok(mut cam)) = (windows.single(), cam.single_mut()) else { return };
+    let (pw, ph) = (win.physical_width().max(1), win.physical_height().max(1));
+    let h = 360.0 * ph as f32 / pw as f32;
+    let strip = (h * 0.27).clamp(190.0, 300.0);
+    let game_px = (((h - strip) / h) * ph as f32).round().max(1.0) as u32;
+    layout.h = h;
+    layout.strip = strip;
+    let want = bevy::render::camera::Viewport { physical_position: UVec2::ZERO, physical_size: UVec2::new(pw, game_px), ..default() };
+    if cam.viewport.as_ref().map(|v| v.physical_size) != Some(want.physical_size) {
+        cam.viewport = Some(want);
+    }
 }
 
 pub fn play(commands: &mut Commands, h: &Handle<AudioSource>, vol: f32) {
@@ -33,7 +77,15 @@ pub enum Chan {
     Wind,
     Breath,
     Heart,
-    Memory,
+    // music layers
+    Drone,
+    Bowls,
+    Tension,
+    Night,
+    Lament,
+    // natural ambiences
+    Flags,
+    Creak,
 }
 #[derive(Component)]
 pub struct ChanVol(f32);
@@ -52,6 +104,13 @@ pub struct Mood {
     pub vignette: f32,
     pub night: f32,
     pub dizzy: f32,
+    // music + ambience targets
+    pub drone: f32,
+    pub bowls: f32,
+    pub tension: f32,
+    pub lament: f32,
+    pub flags: f32,
+    pub creak: f32,
 }
 
 // ------------------------------------------------------------------ captions
@@ -124,11 +183,20 @@ impl Plugin for FxPlugin {
 fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         Camera2d,
+        GameCam,
         Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMin { min_width: VIEW_W, min_height: VIEW_H },
+            scaling_mode: ScalingMode::AutoMin { min_width: VIEW_W, min_height: VIEW_H * 0.82 },
             ..OrthographicProjection::default_2d()
         }),
         Transform::from_xyz(VIEW_W / 2.0, VIEW_H / 2.0, 999.0),
+    ));
+    commands.spawn((
+        Camera2d,
+        UiCam,
+        Camera { order: 1, clear_color: ClearColorConfig::None, ..default() },
+        bevy::render::view::RenderLayers::layer(UI_LAYER),
+        Projection::Orthographic(OrthographicProjection { scaling_mode: ScalingMode::FixedHorizontal { viewport_width: 360.0 }, ..OrthographicProjection::default_2d() }),
+        Transform::from_xyz(0.0, 0.0, 999.0),
     ));
     commands.insert_resource(Sounds {
         whumpf: assets.load("audio/whumpf.ogg"),
@@ -137,8 +205,22 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
         chink: assets.load("audio/chink.ogg"),
         gust: assets.load("audio/gust.ogg"),
         chime: assets.load("audio/chime.ogg"),
+        steps_snow: (0..3).map(|k| assets.load(format!("audio/step_snow{k}.ogg"))).collect(),
+        steps_rock: (0..3).map(|k| assets.load(format!("audio/step_rock{k}.ogg"))).collect(),
+        steps_ice: (0..3).map(|k| assets.load(format!("audio/step_ice{k}.ogg"))).collect(),
     });
-    for (c, file) in [(Chan::Wind, "audio/wind.ogg"), (Chan::Breath, "audio/breath.ogg"), (Chan::Heart, "audio/heart.ogg"), (Chan::Memory, "audio/memory.ogg")] {
+    for (c, file) in [
+        (Chan::Wind, "audio/wind.ogg"),
+        (Chan::Breath, "audio/breath.ogg"),
+        (Chan::Heart, "audio/heart.ogg"),
+        (Chan::Drone, "audio/m_drone.ogg"),
+        (Chan::Bowls, "audio/m_bowls.ogg"),
+        (Chan::Tension, "audio/m_tension.ogg"),
+        (Chan::Night, "audio/m_night.ogg"),
+        (Chan::Lament, "audio/m_lament.ogg"),
+        (Chan::Flags, "audio/flags.ogg"),
+        (Chan::Creak, "audio/creak.ogg"),
+    ] {
         commands.spawn((c, ChanVol(0.0), AudioPlayer::new(assets.load(file)), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
     }
 
@@ -176,7 +258,15 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
     }
 }
 
-pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, hz: Res<Hazards>, mut hq: Query<&mut Hero>, time: Res<Time>) {
+pub fn mood_system(
+    mut mood: ResMut<Mood>,
+    story: Res<Story>,
+    hz: Res<Hazards>,
+    terrain: Res<crate::terrain::Terrain>,
+    controls: Res<crate::controls::Controls>,
+    mut hq: Query<&mut Hero>,
+    time: Res<Time>,
+) {
     let Ok(mut h) = hq.single_mut() else { return };
     let dt = time.delta_secs().min(0.05);
     let fatigue = 1.0 - h.stamina / 100.0;
@@ -186,8 +276,27 @@ pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, hz: Res<Hazards>, 
     let mut wind_x = -22.0 - h.pos.y * 0.04;
     let mut breath = (fatigue * 0.9 + if climbing { 0.1 } else { 0.0 } + hz.dizzy * 0.5).min(1.0);
     let mut heart: f32 = 0.0;
-    let mut memory = 0.0;
+    let mut memory: f32 = 0.0;
     let mut dark = 0.0;
+    // ---- music: a drone while he climbs, bowls when he stops, tension when the mountain warns,
+    // silence when it strikes, the lament for memory and for the moments he might give up
+    let resting = matches!(h.state, HState::Rest | HState::Sit | HState::Kneel);
+    let danger = hz.rock_warn > 0.0 || hz.rock_danger > 0.0 || hz.ice_warn > 0.0 || hz.avalanche_running() || matches!(h.state, HState::Slide { .. } | HState::Crevasse { .. });
+    let mut drone = 0.55 * (1.0 - 0.5 * hz.night);
+    let mut bowls = if resting || terrain.part(h.s) == 0 { 0.6 } else { 0.12 };
+    let mut tension = if danger { 0.75 } else { 0.0 };
+    let near_quit = (controls.idle / 14.0 - 1.0).clamp(0.0, 1.0); // stopped for a long while
+    let mut lament = (0.55 * near_quit).max(0.12 * hz.night);
+    if hz.avalanche_warning() || h.state == HState::Buried {
+        drone = 0.0;
+        bowls = 0.0;
+        tension = 0.0;
+        lament = 0.0;
+    }
+    let flag_s = [205.0, terrain.part_s[16] + 90.0];
+    let flags = flag_s.iter().map(|&f| (1.0 - (h.s - f).abs() / 220.0).max(0.0)).fold(0.0, f32::max);
+    let (c0, c1) = terrain.part_range(12);
+    let creak = if h.s > c0 - 80.0 && h.s < c1 + 40.0 { 0.6 } else { 0.0 };
     if hz.avalanche_warning() {
         wind = 0.04; // the silence before
         heart = 0.5;
@@ -222,18 +331,27 @@ pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, hz: Res<Hazards>, 
             breath = 0.3;
             memory = 0.65;
             wind_x = -12.0;
+            drone = 0.0;
+            tension = 0.0;
+            lament = 0.85;
         }
         Stage::Checkpoint => {
             wind = 0.16;
             breath = 0.25;
             memory = 0.5;
             wind_x = -15.0;
+            drone = 0.2;
+            bowls = 0.6;
+            lament = 0.6;
         }
         Stage::End => {
             wind = 0.14; // the world keeps going after the picture ends
             breath = 0.0;
             memory = 0.45;
             dark = (story.t / 3.0).min(1.0);
+            drone = 0.0;
+            bowls = 0.3;
+            lament = 0.5;
         }
         _ => {}
     }
@@ -242,6 +360,13 @@ pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, hz: Res<Hazards>, 
         mood.flash = 0.45;
         mood.shake = mood.shake.max(0.35);
     }
+    let _ = memory;
+    mood.drone = drone;
+    mood.bowls = bowls;
+    mood.tension = tension;
+    mood.lament = lament;
+    mood.flags = flags;
+    mood.creak = creak;
     mood.wind = wind;
     mood.breath = breath;
     mood.heart = heart;
@@ -258,7 +383,7 @@ pub fn mood_system(mut mood: ResMut<Mood>, story: Res<Story>, hz: Res<Hazards>, 
 }
 
 pub fn camera_follow(
-    mut cam: Query<(&mut Transform, &Projection), With<Camera2d>>,
+    mut cam: Query<(&mut Transform, &Projection), With<GameCam>>,
     hq: Query<&Hero>,
     mood: Res<Mood>,
     mut st: ResMut<CamState>,
@@ -286,7 +411,7 @@ pub fn camera_follow(
 }
 
 pub fn camera_locked(
-    cam: Query<(&Transform, &Projection), (With<Camera2d>, Without<Overlay>)>,
+    cam: Query<(&Transform, &Projection), (With<GameCam>, Without<Overlay>)>,
     mut q: Query<(&Overlay, &mut Transform, &mut Sprite)>,
     mood: Res<Mood>,
 ) {
@@ -331,7 +456,7 @@ pub fn camera_locked(
 }
 
 pub fn snow_system(
-    cam: Query<(&Transform, &Projection), (With<Camera2d>, Without<Flake>)>,
+    cam: Query<(&Transform, &Projection), (With<GameCam>, Without<Flake>)>,
     mut q: Query<(&mut Flake, &mut Transform)>,
     mood: Res<Mood>,
     time: Res<Time>,
@@ -366,9 +491,21 @@ pub fn audio_mix(mood: Res<Mood>, time: Res<Time>, mut q: Query<(&Chan, &mut Cha
             Chan::Wind => mood.wind,
             Chan::Breath => mood.breath * 0.8,
             Chan::Heart => mood.heart * 0.7,
-            Chan::Memory => mood.memory * 0.6,
+            Chan::Drone => mood.drone * 0.55,
+            Chan::Bowls => mood.bowls * 0.5,
+            Chan::Tension => mood.tension * 0.6,
+            Chan::Night => mood.night * 0.45,
+            Chan::Lament => mood.lament * 0.6,
+            Chan::Flags => mood.flags * 0.6,
+            Chan::Creak => mood.creak * 0.55,
         };
-        let rate = if *c == Chan::Wind { 1.6 } else { 1.0 };
+        // music swells slowly; danger cuts in fast; silence falls fast
+        let rate = match c {
+            Chan::Wind => 1.6,
+            Chan::Tension => if target > v.0 { 3.0 } else { 0.6 },
+            Chan::Drone | Chan::Bowls | Chan::Lament | Chan::Night => if target < v.0 && target < 0.05 { 2.5 } else { 0.35 },
+            _ => 1.0,
+        };
         v.0 += (target - v.0) * (dt * rate).min(1.0);
         sink.set_volume(Volume::Linear(v.0.max(0.0)));
     }
@@ -377,7 +514,7 @@ pub fn audio_mix(mood: Res<Mood>, time: Res<Time>, mut q: Query<(&Chan, &mut Cha
 pub fn captions_system(
     mut caps: ResMut<Captions>,
     time: Res<Time>,
-    cam: Query<(&Transform, &Projection), (With<Camera2d>, Without<CapSlot>)>,
+    cam: Query<(&Transform, &Projection), (With<GameCam>, Without<CapSlot>)>,
     mut q: Query<(&CapSlot, &mut Text2d, &mut TextColor, &mut Transform)>,
     hq: Query<&Hero>,
 ) {

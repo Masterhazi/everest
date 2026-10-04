@@ -3,7 +3,7 @@
 //! All five tools are always available — what they do depends on where he is.
 
 use crate::controls::{Controls, Tool};
-use crate::fx::{play, Sounds};
+use crate::fx::{play, play_varied, Sounds};
 use crate::hazards::Hazards;
 use crate::hints::{Cause, HintLog};
 use crate::skill::Skill;
@@ -487,6 +487,9 @@ pub fn hero_system(
 }
 
 pub fn animate_hero(
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+    mut last_idx: Local<usize>,
     time: Res<Time>,
     terrain: Res<Terrain>,
     mut q: Query<(&Hero, &mut Sprite, &mut Transform, &mut Visibility), Without<CoatRoll>>,
@@ -531,6 +534,21 @@ pub fn animate_hero(
     };
     if let Some(a) = s.texture_atlas.as_mut() {
         a.index = idx;
+    }
+    // footsteps that sound like what he's standing on; hands and boots on rock while climbing
+    if idx != *last_idx {
+        let foot = idx == cell(WALK, 1) || idx == cell(WALK, 3);
+        let hand = g.wall && g.surf == Surface::Rock && (idx == cell(CLIMB, 0) || idx == cell(CLIMB, 2));
+        if foot || hand {
+            let set = match g.surf {
+                Surface::Snow => &sounds.steps_snow,
+                Surface::Rock => &sounds.steps_rock,
+                Surface::Ice => &sounds.steps_ice,
+            };
+            let k = (time.elapsed_secs() * 7.0) as usize % set.len();
+            play_varied(&mut commands, &set[k], if hand { 0.25 } else { 0.4 });
+        }
+        *last_idx = idx;
     }
     s.flip_x = h.facing < 0.0;
     let still = matches!(h.state, HState::Move | HState::Rest | HState::Sit | HState::Kneel) && !h.moving;

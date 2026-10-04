@@ -5,6 +5,7 @@
 use crate::fx::{play, Mood, Sounds};
 use crate::hero::{HState, Hero};
 use crate::hints::{Cause, HintLog};
+use crate::fx::GameCam;
 use crate::skill::Skill;
 use crate::story::Story;
 use crate::terrain::{Terrain, Zone};
@@ -209,7 +210,7 @@ pub fn hazards_system(
     mut hints: ResMut<HintLog>,
     mut mood: ResMut<Mood>,
     time: Res<Time>,
-    cam: Query<&Transform, (With<Camera2d>, Without<Particle>, Without<Serac>, Without<Hero>)>,
+    cam: Query<&Transform, (With<GameCam>, Without<Particle>, Without<Serac>, Without<Hero>)>,
     mut hq: Query<&mut Hero>,
     mut parts: Query<(Entity, &mut Particle, &mut Transform), (Without<Serac>, Without<Hero>)>,
     mut seracs: Query<(&Serac, &mut Transform), (Without<Particle>, Without<Hero>)>,

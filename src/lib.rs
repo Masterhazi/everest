@@ -36,7 +36,7 @@ pub fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Everest".into(),
-                        resolution: WindowResolution::new(405.0, 720.0),
+                        resolution: window_size(),
                         // web: fill the page, don't let the browser scroll/zoom on touch
                         canvas: Some("#bevy".into()),
                         fit_canvas_to_parent: true,
@@ -49,6 +49,7 @@ pub fn main() {
         .add_systems(PreStartup, install_panic_logger)
         .init_resource::<skill::Skill>()
         .init_resource::<hints::HintLog>()
+        .init_resource::<fx::Layout>()
         .add_plugins((
             terrain::TerrainPlugin,
             hazards::HazardsPlugin,
@@ -61,6 +62,7 @@ pub fn main() {
         .add_systems(
             Update,
             (
+                fx::layout_system,
                 controls::read_input,
                 story::story_system,
                 hero::hero_system,
@@ -103,4 +105,13 @@ fn render_plugin() -> bevy::render::RenderPlugin {
         settings.backends = Some(bevy::render::settings::Backends::GL);
     }
     bevy::render::RenderPlugin { render_creation: settings.into(), ..default() }
+}
+
+/// Desktop window size; EVEREST_WINDOW=WxH for testing other phone shapes (e.g. 360x800 = 20:9).
+fn window_size() -> WindowResolution {
+    let (w, h) = std::env::var("EVEREST_WINDOW")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or((405.0, 720.0));
+    WindowResolution::new(w, h)
 }

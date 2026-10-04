@@ -5,6 +5,8 @@
 
 use crate::hazards::{Hazards, BOULDER_OFFSET};
 use crate::hints::HintLog;
+use crate::fx::{Layout, UiCam, UI_LAYER};
+use bevy::render::view::RenderLayers;
 use crate::hero::{HState, Hero};
 use crate::story::{coat_s, Stage, Story};
 use crate::terrain::{Surface, Terrain, Zone};
@@ -29,6 +31,8 @@ pub struct Controls {
     pub stick: Vec2,
     pub taps: Vec<Tool>,
     pub any_tap: bool,
+    /// seconds without any input (the game just waits; the music notices)
+    pub idle: f32,
 }
 
 #[derive(Resource, Default)]
@@ -53,9 +57,10 @@ pub struct JoyBase;
 pub struct JoyKnob;
 #[derive(Component)]
 pub struct ToolButton(pub Tool);
+#[derive(Component)]
+pub struct StripBg;
 
 pub const JOY_R: f32 = 44.0;
-const BTN: f32 = 52.0;
 
 pub struct ControlsPlugin;
 impl Plugin for ControlsPlugin {
@@ -77,12 +82,18 @@ impl Plugin for ControlsPlugin {
 }
 
 fn spawn_controls(mut commands: Commands, assets: Res<AssetServer>) {
+    let ui = RenderLayers::layer(UI_LAYER);
+    // the control strip: a dark deck under the game, with a faint edge
+    commands.spawn((StripBg, ui.clone(), Sprite::from_color(Color::srgb(0.035, 0.05, 0.085), Vec2::ONE), Transform::from_xyz(0., 0., 900.)));
+    commands.spawn((StripBg, ui.clone(), Sprite::from_color(Color::srgba(0.55, 0.65, 0.8, 0.25), Vec2::ONE), Transform::from_xyz(0., 0., 901.)));
     commands.spawn((
+        ui.clone(),
         JoyBase,
         Sprite { image: assets.load("sprites/joy_base.png"), custom_size: Some(Vec2::splat(JOY_R * 2.3)), color: Color::srgba(1., 1., 1., 0.6), ..default() },
         Transform::from_xyz(0., 0., 950.),
     ));
     commands.spawn((
+        ui.clone(),
         JoyKnob,
         Sprite { image: assets.load("sprites/joy_knob.png"), custom_size: Some(Vec2::splat(34.0)), color: Color::srgba(1., 1., 1., 0.8), ..default() },
         Transform::from_xyz(0., 0., 951.),
@@ -95,7 +106,7 @@ fn spawn_controls(mut commands: Commands, assets: Res<AssetServer>) {
             Tool::Lamp => "sprites/ui_headlamp.png",
             Tool::Rest => "sprites/ui_rest.png",
         };
-        commands.spawn((ToolButton(t), Sprite { image: assets.load(img), custom_size: Some(Vec2::splat(BTN)), color: Color::srgba(1., 1., 1., 0.85), ..default() }, Transform::from_xyz(0., 0., 950.)));
+        commands.spawn((ui.clone(), ToolButton(t), Sprite { image: assets.load(img), custom_size: Some(Vec2::splat(52.0)), color: Color::srgba(1., 1., 1., 0.85), ..default() }, Transform::from_xyz(0., 0., 950.)));
     }
 }
 
@@ -105,11 +116,22 @@ pub fn view_area(proj: &Projection) -> Rect {
         _ => Rect::from_center_size(Vec2::ZERO, Vec2::new(crate::VIEW_W, VIEW_H)),
     }
 }
-fn joy_center(a: Rect) -> Vec2 {
-    Vec2::new(a.min.x + 80.0, a.min.y + 112.0)
+// Control-space: origin at screen centre, width 360, height `layout.h`; the strip is the bottom `layout.strip`.
+fn joy_center(l: &Layout) -> Vec2 {
+    Vec2::new(-92.0, -l.h / 2.0 + l.strip * 0.5)
 }
-fn button_pos(a: Rect, slot: usize) -> Vec2 {
-    Vec2::new(a.max.x - 42.0, a.min.y + 66.0 + slot as f32 * 60.0)
+/// The axe is the big one nearest the thumb; the rest sit in an easy arc above it.
+fn button(l: &Layout, t: Tool) -> (Vec2, f32) {
+    let b = -l.h / 2.0;
+    let low = b + l.strip * 0.34;
+    let high = b + l.strip * 0.76;
+    match t {
+        Tool::Axe => (Vec2::new(122.0, low), 70.0),
+        Tool::Dig => (Vec2::new(44.0, low), 54.0),
+        Tool::Lamp => (Vec2::new(30.0, high), 48.0),
+        Tool::Rest => (Vec2::new(88.0, high), 48.0),
+        Tool::Rope => (Vec2::new(146.0, high), 48.0),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -120,7 +142,8 @@ pub fn read_input(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     window: Query<&Window, With<PrimaryWindow>>,
-    cam: Query<(&Camera, &GlobalTransform, &Projection)>,
+    cam: Query<(&Camera, &GlobalTransform), With<UiCam>>,
+    layout: Res<Layout>,
     hero: Query<&Hero>,
     story: Res<Story>,
     terrain: Res<Terrain>,
@@ -131,12 +154,8 @@ pub fn read_input(
     controls.taps.clear();
     controls.any_tap = false;
     controls.stick = Vec2::ZERO;
-    let Ok((camera, cam_gt, proj)) = cam.single() else { return };
-    let area = view_area(proj);
-    let cam_pos = cam_gt.translation().truncate();
-    // camera may be tilted (altitude); undo it so touch maps to the screen, not the world
-    let inv = cam_gt.compute_transform().rotation.inverse();
-    let to_view = |p: Vec2| camera.viewport_to_world_2d(cam_gt, p).ok().map(|w| (inv * (w - cam_pos).extend(0.0)).truncate());
+    let Ok((camera, cam_gt)) = cam.single() else { return };
+    let to_view = |p: Vec2| camera.viewport_to_world_2d(cam_gt, p).ok();
     let mut pointers: Vec<(u64, Vec2, bool)> = vec![];
     for t in touches.iter() {
         if let Some(v) = to_view(t.position()) {
@@ -150,19 +169,22 @@ pub fn read_input(
             }
         }
     }
-    let jc = joy_center(area);
+    let jc = joy_center(&layout);
+    let strip_top = -layout.h / 2.0 + layout.strip;
     let mut joy_alive = false;
     for (id, v, just) in pointers.iter().copied() {
         if just {
             controls.any_tap = true;
             let mut hit = false;
-            for (slot, t) in ALL_TOOLS.iter().enumerate() {
-                if v.distance(button_pos(area, slot)) < BTN * 0.62 {
-                    controls.taps.push(*t);
+            for t in ALL_TOOLS {
+                let (p, size) = button(&layout, t);
+                if v.distance(p) < size * 0.62 {
+                    controls.taps.push(t);
                     hit = true;
                 }
             }
-            if !hit && joy.id.is_none() && v.x < area.center().x && v.y < area.min.y + area.height() * 0.45 {
+            // the left half of the strip (and a little above it) is the joystick
+            if !hit && joy.id.is_none() && v.x < 0.0 && v.y < strip_top + 30.0 {
                 joy.id = Some(id);
             }
         }
@@ -192,6 +214,8 @@ pub fn read_input(
     if keys.just_pressed(KeyCode::Enter) {
         controls.any_tap = true;
     }
+    let active = controls.stick.length() > 0.2 || !controls.taps.is_empty();
+    controls.idle = if active { 0.0 } else { controls.idle + time.delta_secs() };
     if auto.on {
         if let Ok(h) = hero.single() {
             autopilot(&mut controls, &mut auto, h, &story, &terrain, &hz, time.delta_secs());
@@ -306,34 +330,43 @@ pub fn draw_controls(
     controls: Res<Controls>,
     story: Res<Story>,
     hints: Res<HintLog>,
+    layout: Res<Layout>,
     time: Res<Time>,
-    cam: Query<(&Transform, &Projection), (With<Camera2d>, Without<JoyBase>, Without<JoyKnob>, Without<ToolButton>)>,
-    mut base: Query<(&mut Transform, &mut Sprite), (With<JoyBase>, Without<JoyKnob>, Without<ToolButton>)>,
-    mut knob: Query<(&mut Transform, &mut Sprite), (With<JoyKnob>, Without<JoyBase>, Without<ToolButton>)>,
-    mut buttons: Query<(&ToolButton, &mut Transform, &mut Sprite), (Without<JoyBase>, Without<JoyKnob>)>,
+    mut strip: Query<(&mut Transform, &mut Sprite), (With<StripBg>, Without<JoyBase>, Without<JoyKnob>, Without<ToolButton>)>,
+    mut base: Query<(&mut Transform, &mut Sprite), (With<JoyBase>, Without<JoyKnob>, Without<ToolButton>, Without<StripBg>)>,
+    mut knob: Query<(&mut Transform, &mut Sprite), (With<JoyKnob>, Without<JoyBase>, Without<ToolButton>, Without<StripBg>)>,
+    mut buttons: Query<(&ToolButton, &mut Transform, &mut Sprite), (Without<JoyBase>, Without<JoyKnob>, Without<StripBg>)>,
 ) {
-    let Ok((ct, proj)) = cam.single() else { return };
-    let area = view_area(proj);
-    let cp = ct.translation.truncate();
-    let rot = ct.rotation;
-    let place = |v: Vec2| cp + (rot * v.extend(0.0)).truncate();
-    let ui_alpha = if story.hide_ui { 0.0 } else { 1.0 };
-    let jc = joy_center(area);
+    if layout.h <= 0.0 {
+        return;
+    }
+    let b = -layout.h / 2.0;
+    for (k, (mut t, mut s)) in strip.iter_mut().enumerate() {
+        if k == 0 {
+            // deck: covers the strip and a margin below (gesture bar area)
+            t.translation = Vec3::new(0.0, b + layout.strip / 2.0 - 40.0, 900.0);
+            s.custom_size = Some(Vec2::new(420.0, layout.strip + 80.0));
+        } else {
+            t.translation = Vec3::new(0.0, b + layout.strip, 901.0);
+            s.custom_size = Some(Vec2::new(420.0, 1.0));
+        }
+    }
+    let ui_alpha = if story.hide_ui { 0.15 } else { 1.0 };
+    let jc = joy_center(&layout);
     if let Ok((mut t, mut s)) = base.single_mut() {
-        t.translation = place(jc).extend(950.0);
-        t.rotation = rot;
+        t.translation = jc.extend(950.0);
         s.color = Color::srgba(1., 1., 1., 0.55 * ui_alpha);
     }
     if let Ok((mut t, mut s)) = knob.single_mut() {
-        t.translation = place(jc + controls.stick * JOY_R).extend(951.0);
+        t.translation = (jc + controls.stick * JOY_R).extend(951.0);
         s.color = Color::srgba(1., 1., 1., 0.85 * ui_alpha);
     }
-    for (b, mut t, mut s) in buttons.iter_mut() {
-        let slot = ALL_TOOLS.iter().position(|x| *x == b.0).unwrap_or(0);
-        t.translation = place(button_pos(area, slot)).extend(950.0);
-        t.rotation = rot;
-        let pressed = controls.taps.contains(&b.0);
-        let glow = hints.glow.is_some_and(|(g, _)| g == b.0);
+    for (bt, mut t, mut s) in buttons.iter_mut() {
+        let (p, size) = button(&layout, bt.0);
+        t.translation = p.extend(950.0);
+        s.custom_size = Some(Vec2::splat(size));
+        let pressed = controls.taps.contains(&bt.0);
+        let glow = hints.glow.is_some_and(|(g, _)| g == bt.0);
         let pulse = if glow { 1.0 + 0.1 * (time.elapsed_secs() * 6.0).sin().abs() } else { 1.0 };
         t.scale = Vec3::splat(if pressed { 0.9 } else { pulse });
         s.color = if glow { Color::srgba(1.3, 1.2, 0.7, ui_alpha) } else { Color::srgba(1., 1., 1., 0.85 * ui_alpha) };

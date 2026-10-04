@@ -305,8 +305,7 @@ pub fn restart_system(
     mut hq: Query<&mut Hero>,
     level: Query<Entity, With<LevelEntity>>,
     assets: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<ColorMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     skill: Res<Skill>,
 ) {
     if !story.restart {
@@ -316,7 +315,7 @@ pub fn restart_system(
         commands.entity(e).despawn();
     }
     let t = Terrain::generate();
-    spawn_terrain(&mut commands, &t, &assets, &mut meshes, &mut mats);
+    spawn_terrain(&mut commands, &t, &assets, &mut images);
     spawn_hazard_props(&mut commands, &t, &assets);
     spawn_story_props(&mut commands, &t, &assets);
     commands.insert_resource(Hazards::new(&t));

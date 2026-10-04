@@ -7,9 +7,8 @@
 
 use crate::LevelEntity;
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::sprite::Anchor;
 use rand::Rng;
 
@@ -158,104 +157,138 @@ impl Plugin for TerrainPlugin {
     }
 }
 
-fn spawn_terrain_startup(
-    mut commands: Commands,
-    terrain: Res<Terrain>,
-    assets: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<ColorMaterial>>,
-) {
-    spawn_terrain(&mut commands, &terrain, &assets, &mut meshes, &mut mats);
+fn spawn_terrain_startup(mut commands: Commands, terrain: Res<Terrain>, assets: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+    spawn_terrain(&mut commands, &terrain, &assets, &mut images);
 }
 
-fn repeat_tex(assets: &AssetServer, path: &'static str) -> Handle<Image> {
-    assets.load_with_settings(path, |s: &mut ImageLoaderSettings| {
-        s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            ..ImageSamplerDescriptor::nearest()
-        });
-    })
+/// A small RGBA texture we sample from while painting the mountain.
+struct Tex {
+    w: usize,
+    h: usize,
+    px: Vec<u8>,
 }
-
-/// Simple triangle-list mesh builder with world-space UVs (textures repeat every `tile` px).
-struct MeshB {
-    pos: Vec<[f32; 3]>,
-    uv: Vec<[f32; 2]>,
-    idx: Vec<u32>,
-    tile: f32,
-}
-impl MeshB {
-    fn new(tile: f32) -> Self {
-        MeshB { pos: vec![], uv: vec![], idx: vec![], tile }
+impl Tex {
+    fn load(bytes: &[u8]) -> Tex {
+        use bevy::image::{CompressedImageFormats, ImageType};
+        let img = Image::from_buffer(bytes, ImageType::Extension("png"), CompressedImageFormats::NONE, true, ImageSampler::Default, RenderAssetUsages::MAIN_WORLD)
+            .expect("embedded texture");
+        let rgba = img.convert(bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb).unwrap_or(img);
+        Tex { w: rgba.width() as usize, h: rgba.height() as usize, px: rgba.data.clone().unwrap_or_default() }
     }
-    fn quad(&mut self, q: [Vec2; 4]) {
-        let base = self.pos.len() as u32;
-        for p in q {
-            self.pos.push([p.x, p.y, 0.0]);
-            self.uv.push([p.x / self.tile, -p.y / self.tile]);
-        }
-        self.idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-    fn build(self) -> Mesh {
-        let n = self.pos.len();
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; n])
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uv)
-            .with_inserted_indices(Indices::U32(self.idx))
+    fn at(&self, x: i32, y: i32) -> [u8; 4] {
+        let xx = x.rem_euclid(self.w as i32) as usize;
+        let yy = y.rem_euclid(self.h as i32) as usize;
+        let i = (yy * self.w + xx) * 4;
+        if i + 3 < self.px.len() { [self.px[i], self.px[i + 1], self.px[i + 2], 255] } else { [80, 80, 90, 255] }
     }
 }
 
-pub fn spawn_terrain(
-    commands: &mut Commands,
-    t: &Terrain,
-    assets: &AssetServer,
-    meshes: &mut Assets<Mesh>,
-    mats: &mut Assets<ColorMaterial>,
-) {
-    const BOTTOM: f32 = -700.0;
-    // the mountain's body
-    let mut body = MeshB::new(64.0);
-    for g in &t.segs {
-        if g.b.x - g.a.x > 0.01 {
-            body.quad([Vec2::new(g.a.x, BOTTOM), Vec2::new(g.b.x, BOTTOM), g.b, g.a]);
-        }
-    }
-    // keep going past the end so the summit side isn't a cliff into nothing
+const TILE: i32 = 512;
+
+/// Paint the mountain into a handful of 512px sprite tiles, once.
+/// (No meshes: the 2D mesh pipeline doesn't compile on some old phones' OpenGL ES drivers.)
+pub fn spawn_terrain(commands: &mut Commands, t: &Terrain, assets: &AssetServer, images: &mut Assets<Image>) {
+    let body = Tex::load(include_bytes!("../assets/sprites/tex_body.png"));
+    let rock = Tex::load(include_bytes!("../assets/sprites/tex_rock.png"));
+    let ice = Tex::load(include_bytes!("../assets/sprites/tex_ice.png"));
+    let snow = Tex::load(include_bytes!("../assets/sprites/tex_snow.png"));
+    let skin = |s: Surface| match s {
+        Surface::Snow => &snow,
+        Surface::Ice => &ice,
+        Surface::Rock => &rock,
+    };
     let end = t.segs.last().unwrap().b;
-    body.quad([Vec2::new(end.x, BOTTOM), Vec2::new(end.x + 900.0, BOTTOM), Vec2::new(end.x + 900.0, end.y + 60.0), end]);
-    commands.spawn((
-        LevelEntity,
-        Mesh2d(meshes.add(body.build())),
-        MeshMaterial2d(mats.add(ColorMaterial { color: Color::srgb(0.55, 0.6, 0.75), texture: Some(repeat_tex(assets, "sprites/tex_body.png")), ..default() })),
-        Transform::from_xyz(0.0, 0.0, 2.0),
-    ));
-
-    // the skin: snow / ice / rock along the path, a little thickness into the mountain
-    for (surf, path, tile, z) in [
-        (Surface::Rock, "sprites/tex_rock.png", 40.0, 3.0),
-        (Surface::Ice, "sprites/tex_ice.png", 44.0, 3.1),
-        (Surface::Snow, "sprites/tex_snow.png", 40.0, 3.2),
-    ] {
-        let mut m = MeshB::new(tile);
-        for g in t.segs.iter().filter(|g| g.surf == surf) {
-            let n = Vec2::new(g.dir.y, -g.dir.x); // into the mountain
-            let th = if g.wall { 14.0 } else { 11.0 };
-            // overlap neighbours slightly so joints don't show
-            let a = g.a - g.dir * 2.0;
-            let b = g.b + g.dir * 2.0;
-            m.quad([a + n * th, b + n * th, b + Vec2::new(0.0, 1.5), a + Vec2::new(0.0, 1.5)]);
-        }
-        if m.pos.is_empty() {
+    let x0 = -40;
+    let x1 = end.x as i32 + 420;
+    let y_min = t.segs.iter().map(|g| g.a.y).fold(f32::MAX, f32::min) as i32 - 360;
+    let y_max = end.y as i32 + 40;
+    let w = (x1 - x0) as usize;
+    // surface height and surface type for every pixel column
+    let mut top = vec![f32::MIN; w];
+    let mut surf = vec![Surface::Snow; w];
+    for g in &t.segs {
+        if g.b.x - g.a.x < 0.01 {
             continue;
         }
-        commands.spawn((
-            LevelEntity,
-            Mesh2d(meshes.add(m.build())),
-            MeshMaterial2d(mats.add(ColorMaterial { texture: Some(repeat_tex(assets, path)), ..default() })),
-            Transform::from_xyz(0.0, 0.0, z),
-        ));
+        let (xa, xb) = (g.a.x.floor() as i32, g.b.x.ceil() as i32);
+        for x in xa..=xb {
+            let i = (x - x0) as usize;
+            if i >= w {
+                continue;
+            }
+            let k = ((x as f32 - g.a.x) / (g.b.x - g.a.x)).clamp(0.0, 1.0);
+            let y = g.a.y + (g.b.y - g.a.y) * k;
+            if y > top[i] {
+                top[i] = y;
+                surf[i] = g.surf;
+            }
+        }
+    }
+    for i in 0..w {
+        if top[i] == f32::MIN {
+            top[i] = if (i as i32 + x0) < 0 { t.segs[0].a.y } else { end.y };
+        }
+    }
+    // faces: the skin wraps round the vertical walls
+    let walls: Vec<(f32, f32, f32, Surface)> = t.segs.iter().filter(|g| g.wall).map(|g| (g.a.x.min(g.b.x), g.a.y, g.b.y, g.surf)).collect();
+
+    let mut ty = y_min;
+    while ty < y_max {
+        let mut tx = x0;
+        while tx < x1 {
+            let mut data = vec![0u8; (TILE * TILE * 4) as usize];
+            let mut any = false;
+            for py in 0..TILE {
+                let wy = (ty + TILE - 1 - py) as f32; // image rows go downwards
+                for px in 0..TILE {
+                    let wx = tx + px;
+                    let i = (wx - x0) as usize;
+                    if i >= w {
+                        continue;
+                    }
+                    let depth = top[i] - wy;
+                    if depth < 0.0 {
+                        continue;
+                    }
+                    let mut c = if depth < 11.0 {
+                        skin(surf[i]).at(wx, -(wy as i32))
+                    } else {
+                        let mut c = body.at(wx, -(wy as i32));
+                        // darker deeper in, so the surface reads
+                        let f = (1.0 - ((depth - 11.0) / 400.0).min(0.45)) * 0.75;
+                        for k in 0..3 {
+                            c[k] = (c[k] as f32 * f * [0.95, 1.0, 1.15][k]).min(255.0) as u8;
+                        }
+                        c
+                    };
+                    for &(wxw, wy0, wy1, ws) in &walls {
+                        let dx = wx as f32 - wxw;
+                        if dx >= 0.0 && dx < 14.0 && wy >= wy0 && wy <= wy1 {
+                            c = skin(ws).at(wx, -(wy as i32));
+                        }
+                    }
+                    let o = ((py * TILE + px) * 4) as usize;
+                    data[o..o + 4].copy_from_slice(&c);
+                    any = true;
+                }
+            }
+            if any {
+                let img = Image::new(
+                    bevy::render::render_resource::Extent3d { width: TILE as u32, height: TILE as u32, depth_or_array_layers: 1 },
+                    bevy::render::render_resource::TextureDimension::D2,
+                    data,
+                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                    RenderAssetUsages::RENDER_WORLD,
+                );
+                commands.spawn((
+                    LevelEntity,
+                    Sprite { image: images.add(img), anchor: Anchor::BottomLeft, ..default() },
+                    Transform::from_xyz(tx as f32, ty as f32, 2.0),
+                ));
+            }
+            tx += TILE;
+        }
+        ty += TILE;
     }
 
     // props that sit on the surface

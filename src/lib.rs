@@ -8,6 +8,7 @@ pub mod controls;
 pub mod fx;
 pub mod hazards;
 pub mod hero;
+pub mod hints;
 pub mod skill;
 pub mod story;
 pub mod terrain;
@@ -47,6 +48,7 @@ pub fn main() {
         )
         .add_systems(PreStartup, install_panic_logger)
         .init_resource::<skill::Skill>()
+        .init_resource::<hints::HintLog>()
         .add_plugins((
             terrain::TerrainPlugin,
             hazards::HazardsPlugin,
@@ -64,6 +66,7 @@ pub fn main() {
                 hero::hero_system,
                 hazards::hazards_system,
                 skill::skill_system,
+                hints::hints_system,
                 hero::animate_hero,
                 fx::mood_system,
                 fx::camera_follow,

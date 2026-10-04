@@ -36,6 +36,7 @@ lto = "thin"
 package = "com.haziaafridbaba.everest"
 apk_name = "everest"
 assets = "assets"
+resources = "res"
 build_targets = ["aarch64-linux-android"]
 strip = "strip"
 
@@ -45,6 +46,7 @@ target_sdk_version = 34
 
 [package.metadata.android.application]
 label = "Everest"
+icon = "@mipmap/ic_launcher"
 debuggable = false
 
 [package.metadata.android.application.activity]

@@ -4,6 +4,7 @@
 
 use crate::fx::{play, Mood, Sounds};
 use crate::hero::{HState, Hero};
+use crate::hints::{Cause, HintLog};
 use crate::skill::Skill;
 use crate::story::Story;
 use crate::terrain::{Terrain, Zone};
@@ -49,6 +50,7 @@ pub struct Hazards {
     /// 0 day .. 1 full night
     pub night: f32,
     pub dawn: f32,
+    dark_t: f32,
 }
 
 impl Hazards {
@@ -76,6 +78,7 @@ impl Hazards {
             bury_pending: false,
             night: 0.0,
             dawn: 0.0,
+            dark_t: 0.0,
         }
     }
     pub fn avalanche_warning(&self) -> bool {
@@ -203,6 +206,7 @@ pub fn hazards_system(
     story: Res<Story>,
     sounds: Res<Sounds>,
     mut skill: ResMut<Skill>,
+    mut hints: ResMut<HintLog>,
     mut mood: ResMut<Mood>,
     time: Res<Time>,
     cam: Query<&Transform, (With<Camera2d>, Without<Particle>, Without<Serac>, Without<Hero>)>,
@@ -238,6 +242,13 @@ pub fn hazards_system(
     let (n1, _) = terrain.part_range(13);
     let t = ((h.max_s - n0) / (n1 - n0)).clamp(0.0, 1.0);
     hz.night = (t * t * (3.0 - 2.0 * t)) * (1.0 - hz.dawn);
+    if hz.night > 0.6 && !h.lamp && h.moving {
+        hz.dark_t += dt;
+        if hz.dark_t > 8.0 {
+            hz.dark_t = -20.0;
+            hints.note(Cause::Dark);
+        }
+    }
 
     // ---------------------------------------------------------------- crevasse
     let on_bridge = h.state == HState::Move && h.s > hz.bridge.0 && h.s < hz.bridge.1;
@@ -248,6 +259,7 @@ pub fn hazards_system(
             h.planted = false;
             hz.bridge_broken = true;
             skill.event(-0.04);
+            hints.note(Cause::Crevasse);
             mood.shake = 0.4;
             play(&mut commands, &sounds.whumpf, 0.9);
             play(&mut commands, &sounds.crunch, 1.0);
@@ -315,6 +327,7 @@ pub fn hazards_system(
                 h.stamina -= 12.0;
                 h.start_slide(-90.0);
                 skill.event(-0.06);
+                hints.note(Cause::IceHit);
                 hz.ice_timer = hz.ice_timer.max(5.0); // a moment to recover
             } else if d < 90.0 {
                 skill.event(0.04);
@@ -368,6 +381,9 @@ pub fn hazards_system(
                     h.stamina -= 20.0;
                     hz.bury_pending = av.story || rng.gen_bool((0.5 + 0.3 * diff).clamp(0.0, 1.0) as f64);
                     skill.event(-0.06);
+                    if !av.story {
+                        hints.note(Cause::Swept); // the story avalanche is meant to catch you
+                    }
                 }
             }
             if av.front < p0 - 80.0 {
@@ -422,6 +438,10 @@ pub fn hazards_system(
                 h.stamina -= 15.0;
                 h.start_slide(-120.0);
                 skill.event(-0.06);
+                hints.note(Cause::RockHit);
+                if h.rope.is_none() && terrain.anchors.iter().any(|&a| a < h.s && h.s - a < 120.0) {
+                    hints.note(Cause::Unroped);
+                }
                 mood.flash = 0.4;
                 play(&mut commands, &sounds.crunch, 1.0);
                 commands.entity(e).despawn();

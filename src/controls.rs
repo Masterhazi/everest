@@ -4,6 +4,7 @@
 //! (EVEREST_AUTOPLAY=1) used for automated play-testing.
 
 use crate::hazards::{Hazards, BOULDER_OFFSET};
+use crate::hints::HintLog;
 use crate::hero::{HState, Hero};
 use crate::story::{coat_s, Stage, Story};
 use crate::terrain::{Surface, Terrain, Zone};
@@ -304,6 +305,8 @@ fn autopilot(c: &mut Controls, auto: &mut Autopilot, h: &Hero, story: &Story, t:
 pub fn draw_controls(
     controls: Res<Controls>,
     story: Res<Story>,
+    hints: Res<HintLog>,
+    time: Res<Time>,
     cam: Query<(&Transform, &Projection), (With<Camera2d>, Without<JoyBase>, Without<JoyKnob>, Without<ToolButton>)>,
     mut base: Query<(&mut Transform, &mut Sprite), (With<JoyBase>, Without<JoyKnob>, Without<ToolButton>)>,
     mut knob: Query<(&mut Transform, &mut Sprite), (With<JoyKnob>, Without<JoyBase>, Without<ToolButton>)>,
@@ -330,7 +333,9 @@ pub fn draw_controls(
         t.translation = place(button_pos(area, slot)).extend(950.0);
         t.rotation = rot;
         let pressed = controls.taps.contains(&b.0);
-        t.scale = Vec3::splat(if pressed { 0.9 } else { 1.0 });
-        s.color = Color::srgba(1., 1., 1., 0.85 * ui_alpha);
+        let glow = hints.glow.is_some_and(|(g, _)| g == b.0);
+        let pulse = if glow { 1.0 + 0.1 * (time.elapsed_secs() * 6.0).sin().abs() } else { 1.0 };
+        t.scale = Vec3::splat(if pressed { 0.9 } else { pulse });
+        s.color = if glow { Color::srgba(1.3, 1.2, 0.7, ui_alpha) } else { Color::srgba(1., 1., 1., 0.85 * ui_alpha) };
     }
 }

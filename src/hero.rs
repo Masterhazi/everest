@@ -5,6 +5,7 @@
 use crate::controls::{Controls, Tool};
 use crate::fx::{play, Sounds};
 use crate::hazards::Hazards;
+use crate::hints::{Cause, HintLog};
 use crate::skill::Skill;
 use crate::story::{Stage, Story};
 use crate::terrain::{Surface, Terrain, Zone};
@@ -65,6 +66,8 @@ pub struct Hero {
     pub max_s: f32,
     /// set when a tool hits the wrong surface: fx draws sparks / chips
     pub sparks: f32,
+    /// seconds spent pushing up an ice face without a planted axe
+    pub ice_push: f32,
 }
 
 impl Default for Hero {
@@ -91,6 +94,7 @@ impl Default for Hero {
             dig_left: 0,
             max_s: 0.0,
             sparks: 0.0,
+            ice_push: 0.0,
         }
     }
 }
@@ -161,6 +165,7 @@ pub fn hero_system(
     sounds: Res<Sounds>,
     mut skill: ResMut<Skill>,
     mut hz: ResMut<Hazards>,
+    mut hints: ResMut<HintLog>,
     time: Res<Time>,
     mut q: Query<&mut Hero>,
 ) {
@@ -245,6 +250,7 @@ pub fn hero_system(
                     }
                 } else if rock_face {
                     // skids off rock: sparks, a lurch, lost grip
+                    hints.note(Cause::RockAxe);
                     h.sparks = 0.5;
                     h.s -= 10.0;
                     h.stamina -= 5.0;
@@ -291,6 +297,13 @@ pub fn hero_system(
                             }
                         }
                     } else if h.s > g.s0 + 1.0 || terrain.seg(h.s - 2.0).wall {
+                        if stick.y > 0.3 {
+                            h.ice_push += dt;
+                            if h.ice_push > 2.5 {
+                                h.ice_push = 0.0;
+                                hints.note(Cause::IceNoAxe);
+                            }
+                        }
                         ds = -10.0 * dt; // crampons alone won't hold steep ice
                         h.stamina -= 3.0 * drain * dt;
                     }
@@ -319,6 +332,7 @@ pub fn hero_system(
                         if rand::thread_rng().gen_bool(p.clamp(0.0, 1.0) as f64) {
                             h.start_slide(-60.0);
                             skill.event(-0.04);
+                            hints.note(Cause::Slip);
                             return;
                         }
                     }
@@ -337,6 +351,10 @@ pub fn hero_system(
             if g.wall && h.stamina <= 0.0 {
                 h.start_slide(-20.0);
                 skill.event(-0.07);
+                hints.note(Cause::Exhausted);
+                if h.rope.is_none() && terrain.anchors.iter().any(|&a| a < h.s && h.s - a < 120.0) {
+                    hints.note(Cause::Unroped);
+                }
             }
         }
         HState::Slide { mut v, mut peak } => {
@@ -383,6 +401,9 @@ pub fn hero_system(
                     skill.event(0.07);
                 }
                 h.arrest = false;
+                if hard && !h.arrest && g.surf == Surface::Snow && peak > 120.0 {
+                    hints.note(Cause::NoArrest);
+                }
                 if hard {
                     h.falls += 1;
                     h.just_fell = true;

@@ -95,15 +95,15 @@ fn install_panic_logger() {
     info!("everest: started");
 }
 
-/// Old phones: their Vulkan drivers are often buggy. On Android we use OpenGL ES, which every
-/// phone handles well and which loses nothing a 2D pixel-art game needs.
+/// Graphics backend choice for Android.
 fn render_plugin() -> bevy::render::RenderPlugin {
     #[allow(unused_mut)]
     let mut settings = bevy::render::settings::WgpuSettings::default();
-    // (the CI emulator's GL translator lacks sRGB surfaces, so its test build keeps Vulkan)
-    #[cfg(all(target_os = "android", not(feature = "emulator")))]
+    // Vulkan first (it's what the emulator test exercises, so what ships is what's tested);
+    // OpenGL ES only on phones that have no Vulkan at all.
+    #[cfg(target_os = "android")]
     {
-        settings.backends = Some(bevy::render::settings::Backends::GL);
+        settings.backends = Some(bevy::render::settings::Backends::VULKAN | bevy::render::settings::Backends::GL);
     }
     bevy::render::RenderPlugin { render_creation: settings.into(), ..default() }
 }

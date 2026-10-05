@@ -61,7 +61,7 @@ pub fn layout_system(
     let (pw, ph) = (win.physical_width().max(1), win.physical_height().max(1));
     let h = 360.0 * ph as f32 / pw as f32;
     let strip = (h * 0.27).clamp(190.0, 300.0);
-    let game_px = (((h - strip) / h) * ph as f32).round().max(1.0) as u32;
+    let game_px = ((((h - strip) / h) * ph as f32).round() as u32).clamp(1, ph);
     layout.h = h;
     layout.strip = strip;
     let want = bevy::render::camera::Viewport { physical_position: UVec2::ZERO, physical_size: UVec2::new(pw, game_px), ..default() };
@@ -187,6 +187,7 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         Camera2d,
         GameCam,
+        Msaa::Off, // pixel art needs no smoothing; cheaper on old phones
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::AutoMin { min_width: VIEW_W, min_height: VIEW_H * 0.82 },
             ..OrthographicProjection::default_2d()
@@ -196,6 +197,7 @@ fn setup_fx(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         Camera2d,
         UiCam,
+        Msaa::Off,
         Camera { order: 1, clear_color: ClearColorConfig::None, ..default() },
         bevy::render::view::RenderLayers::layer(UI_LAYER),
         Projection::Orthographic(OrthographicProjection { scaling_mode: ScalingMode::FixedHorizontal { viewport_width: 360.0 }, ..OrthographicProjection::default_2d() }),

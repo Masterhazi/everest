@@ -30,6 +30,8 @@ pub enum HState {
     Rise { t: f32 },
     Rest,
     Pause { t: f32, act: Act },
+    /// taking a tool off the pack (or stowing it)
+    Equip { tool: Tool, t: f32, stow: bool },
     /// fell through a snow bridge; axe your way out
     Crevasse { left: i32 },
     Buried,
@@ -68,6 +70,18 @@ pub struct Hero {
     pub sparks: f32,
     /// seconds spent pushing up an ice face without a planted axe
     pub ice_push: f32,
+    /// the tool in his hand (otherwise all of them ride on the pack)
+    pub hand: Option<Tool>,
+    /// seconds since the tool in his hand was last used
+    pub hold: f32,
+    /// tool to reach for once the current one is stowed
+    pub pending: Option<Tool>,
+    /// a tap waiting for the tool to come off the pack
+    pub fire: Option<Tool>,
+    /// 0..1 while hauling himself over the top of a face
+    pub mantle: Option<f32>,
+    /// the atlas cell being shown (animate_hero), for the rope's tie-in point
+    pub cell: usize,
 }
 
 impl Default for Hero {
@@ -95,6 +109,12 @@ impl Default for Hero {
             max_s: 0.0,
             sparks: 0.0,
             ice_push: 0.0,
+            hand: None,
+            hold: 0.0,
+            pending: None,
+            fire: None,
+            mantle: None,
+            cell: 0,
         }
     }
 }
@@ -121,20 +141,28 @@ pub const HERO_SCALE: f32 = 0.95;
 const PULL: f32 = 34.0;
 const G: f32 = 520.0;
 
-// atlas rows (rendered by tools/blender/hero_sheet.py, packed by tools/hero_pack.py)
-const IDLE: usize = 0;
-const WALK: usize = 1;
-const CLIMB: usize = 2;
-const AXE: usize = 3;
-const ROPE: usize = 4;
-const DIG: usize = 5; // col 4: probing snow with the axe
-const EXH: usize = 6;
-const FALL: usize = 7;
-const INJ: usize = 8; // col 4: self-arrest, face down on the axe
-const WALK_TIRED: usize = 9;
-const ROWS: u32 = 10;
-fn cell(row: usize, col: usize) -> usize {
+// atlas rows come from tools/hero_pack.py (src/hero_frames.rs). Notes on the odd cells:
+// DIG col 4 = probing snow with the axe; INJURED col 4 = self-arrest, face down on the axe;
+// EQUIP_* = reaching over the shoulder for a tool (played backwards to stow it).
+use crate::hero_frames::*;
+/// seconds to take a tool off the pack (or put it back)
+pub const EQUIP_T: f32 = 0.32;
+/// a tool stays in his hand this long after use, so repeated taps don't reach for it again
+const HOLD_T: f32 = 0.9;
+/// the last stretch of a face (world px) where he hauls himself over the top
+pub const MANTLE_H: f32 = 69.0;
+pub fn cell(row: usize, col: usize) -> usize {
     row * 5 + col.min(4)
+}
+fn mantle_col(k: f32) -> usize {
+    ((k * 4.0).round() as usize).min(4)
+}
+fn equip_row(tool: Tool) -> usize {
+    match tool {
+        Tool::Axe => EQUIP_AXE,
+        Tool::Dig => EQUIP_SHOVEL,
+        _ => EQUIP_ROPE,
+    }
 }
 
 pub struct HeroPlugin;
@@ -185,7 +213,9 @@ pub fn hero_system(
         let wob = (time.elapsed_secs() * 2.3).sin() * 0.35 * hz.dizzy.min(1.0);
         stick = stick * (1.0 - 0.45 * hz.dizzy.min(1.0)) + Vec2::new(wob, 0.0) * stick.length();
     }
-    let tapped = |t: Tool| !locked && controls.taps.contains(&t);
+    // a tap that was waiting for the tool to come off the pack fires now
+    let fire = h.fire.take();
+    let tapped = |t: Tool| !locked && (controls.taps.contains(&t) || fire == Some(t));
     let diff = skill.diff;
     let drain = 0.85 + 0.3 * diff;
     let perf = (0.45 + 0.55 * (h.stamina / 100.0)) * (1.0 - h.pos.y / 5000.0);
@@ -215,9 +245,42 @@ pub fn hero_system(
     let g = *terrain.seg(h.s);
     let ice_face = g.wall && g.surf == Surface::Ice;
     let rock_face = g.wall && g.surf == Surface::Rock;
+    // lying, resting or kneeling, his hands are free: whatever he held is back on the pack
+    if matches!(h.state, HState::Down { .. } | HState::Rise { .. } | HState::Rest | HState::Kneel | HState::Sit | HState::Crouch) {
+        h.hand = None;
+    }
 
     match h.state {
         HState::Move => {
+            // ---- the tools ride on his pack: reach for one before using it, put it back after.
+            // On an ice face the axe stays in his hand.
+            if let Some(tool) = h.hand {
+                h.hold += dt;
+                let keep = tool == Tool::Axe && ice_face;
+                if !keep && (h.hold > HOLD_T || stick.length() > 0.3) {
+                    h.state = HState::Equip { tool, t: 0.0, stow: true };
+                    return;
+                }
+            }
+            if !locked {
+                for tool in [Tool::Axe, Tool::Dig, Tool::Rope] {
+                    if !controls.taps.contains(&tool) {
+                        continue;
+                    }
+                    if h.hand == Some(tool) {
+                        h.hold = 0.0;
+                    } else if tool != Tool::Axe || h.axe_cd <= 0.0 {
+                        h.state = match h.hand {
+                            Some(cur) => {
+                                h.pending = Some(tool);
+                                HState::Equip { tool: cur, t: 0.0, stow: true }
+                            }
+                            None => HState::Equip { tool, t: 0.0, stow: false },
+                        };
+                        return;
+                    }
+                }
+            }
             if tapped(Tool::Rope) {
                 if let Some(&a) = terrain.anchors.iter().find(|&&a| (h.s - a).abs() < 26.0) {
                     h.rope = Some(a);
@@ -367,6 +430,7 @@ pub fn hero_system(
         HState::Slide { mut v, mut peak } => {
             if tapped(Tool::Axe) {
                 h.arrest = true;
+                h.hand = Some(Tool::Axe); // no time to reach for it: it's already in his fist
             }
             let th = g.deg.to_radians();
             let mut mu = friction(g.surf);
@@ -448,10 +512,28 @@ pub fn hero_system(
         HState::Pause { t, act } => {
             h.state = if t <= 0.0 { HState::Move } else { HState::Pause { t: t - dt, act } };
         }
+        HState::Equip { tool, t, stow } => {
+            let t = t + dt;
+            if t < EQUIP_T {
+                h.state = HState::Equip { tool, t, stow };
+            } else if stow {
+                h.hand = None;
+                h.state = match h.pending.take() {
+                    Some(next) => HState::Equip { tool: next, t: 0.0, stow: false },
+                    None => HState::Move,
+                };
+            } else {
+                h.hand = Some(tool);
+                h.hold = 0.0;
+                h.fire = Some(tool); // the tap that sent him for it
+                h.state = HState::Move;
+            }
+        }
         HState::Crevasse { left } => {
             h.stamina = (h.stamina + 2.0 * dt).min(100.0);
             if tapped(Tool::Axe) && h.axe_cd <= 0.0 {
                 h.axe_cd = 0.25;
+                h.hand = Some(Tool::Axe);
                 play(&mut commands, &sounds.chink, 0.5);
                 if left <= 1 {
                     h.s = hz.bridge.1 + 6.0;
@@ -467,6 +549,7 @@ pub fn hero_system(
         }
         HState::Buried => {
             if tapped(Tool::Dig) {
+                h.hand = Some(Tool::Dig);
                 h.dig_left -= 1;
                 play(&mut commands, &sounds.crunch, 0.9);
                 if h.dig_left <= 0 {
@@ -484,8 +567,17 @@ pub fn hero_system(
     // where his feet are in the world
     let g = *terrain.seg(h.s);
     let mut p = terrain.point(h.s);
+    h.mantle = None;
     if g.wall {
         p.x += -7.0 + h.lean;
+        // the last body-length of a face: hands on the lip, hauling himself over
+        let top = g.s0 + g.len;
+        if h.state == HState::Move && top - h.s < MANTLE_H && !terrain.seg(top + 1.0).wall {
+            let k = (1.0 - (top - h.s) / MANTLE_H).clamp(0.0, 1.0);
+            h.mantle = Some(k);
+            let (hx, hy) = HANDS[MANTLE][mantle_col(k)];
+            p = terrain.point(top) - Vec2::new(hx, hy) * HERO_SCALE;
+        }
     }
     if let HState::Crevasse { left } = h.state {
         p = terrain.point((hz.bridge.0 + hz.bridge.1) / 2.0) - Vec2::Y * (8.0 + 6.0 * left as f32);
@@ -500,49 +592,58 @@ pub fn animate_hero(
     time: Res<Time>,
     terrain: Res<Terrain>,
     sheets: Res<HeroSheets>,
-    mut q: Query<(&Hero, &mut Sprite, &mut Transform, &mut Visibility)>,
+    mut q: Query<(&mut Hero, &mut Sprite, &mut Transform, &mut Visibility)>,
 ) {
-    let Ok((h, mut s, mut t, mut vis)) = q.single_mut() else { return };
+    let Ok((mut h, mut s, mut t, mut vis)) = q.single_mut() else { return };
     let f = |rate: f32, n: usize| ((h.anim_t * rate) as usize) % n;
     let g = terrain.seg(h.s);
     let idx = match h.state {
+        HState::Move if h.mantle.is_some() => cell(MANTLE, mantle_col(h.mantle.unwrap_or(0.0))),
         HState::Move if g.wall => {
             if g.surf == Surface::Ice && h.planted {
                 cell(AXE, (((PULL - h.pull_left) / PULL) * 4.0).round() as usize)
+            } else if h.hand == Some(Tool::Axe) {
+                cell(CLIMB_AXE, f(6.0, 5))
             } else {
                 cell(CLIMB, f(6.0, 5))
             }
         }
         HState::Move if h.moving && h.stamina < 30.0 => cell(WALK_TIRED, f(7.0, 5)),
         HState::Move if h.moving => cell(WALK, f(9.0, 5)),
-        HState::Move if h.stamina < 30.0 => cell(EXH, 0),
+        HState::Move if h.hand.is_some() => cell(equip_row(h.hand.unwrap_or(Tool::Axe)), 4), // holding it, ready
+        HState::Move if h.stamina < 30.0 => cell(EXHAUSTED, 0),
         HState::Move => cell(IDLE, 0),
         HState::Slide { v, .. } => {
             if h.arrest {
-                cell(INJ, 4)
+                cell(INJURED, 4)
             } else {
                 cell(FALL, if v.abs() < 120.0 { 1 } else { 2 })
             }
         }
-        HState::Down { .. } => cell(INJ, 3),
-        HState::Rise { t } => cell(INJ, 3 - ((t / 1.3) * 3.0).min(3.0) as usize),
-        HState::Rest => cell(EXH, 2),
-        HState::Pause { act, .. } => match act {
+        HState::Down { .. } => cell(INJURED, 3),
+        HState::Rise { t } => cell(INJURED, 3 - ((t / 1.3) * 3.0).min(3.0) as usize),
+        HState::Rest => cell(EXHAUSTED, 2),
+        HState::Equip { tool, t, stow } => {
+            let k = (t / EQUIP_T).clamp(0.0, 1.0);
+            cell(equip_row(tool), ((if stow { 1.0 - k } else { k }) * 4.0).round() as usize)
+        }
+        HState::Pause { act, t } => match act {
             Act::Probe => cell(DIG, 4),
             Act::Scoop => cell(DIG, 1),
             Act::Clank => cell(DIG, 2),
             Act::Fumble => cell(ROPE, 2),
-            Act::Lift => cell(EXH, 3),
+            Act::Lift => cell(PICKUP, (((1.5 - t) / 1.5) * 4.0).round() as usize),
         },
         HState::Crevasse { .. } => cell(CLIMB, ((time.elapsed_secs() * 3.0) as usize) % 5),
         HState::Buried => cell(FALL, 3),
         HState::Crouch => cell(DIG, 0),
-        HState::Kneel => cell(EXH, 3),
-        HState::Sit => cell(EXH, 2),
+        HState::Kneel => cell(EXHAUSTED, 3),
+        HState::Sit => cell(EXHAUSTED, 2),
     };
     if let Some(a) = s.texture_atlas.as_mut() {
         a.index = idx;
     }
+    h.cell = idx;
     // footsteps that sound like what he's standing on; hands and boots on rock while climbing
     if idx != *last_idx {
         let foot = [WALK, WALK_TIRED].iter().any(|&r| idx == cell(r, 1) || idx == cell(r, 3));

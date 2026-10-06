@@ -72,8 +72,6 @@ pub struct CrossProp;
 pub struct CoatProp;
 #[derive(Component)]
 pub struct CoatMound;
-#[derive(Component)]
-pub struct RopeLine;
 
 pub fn coat_s(t: &Terrain) -> f32 {
     t.part_s[10] + BOULDER_OFFSET + 42.0
@@ -106,14 +104,13 @@ pub fn spawn_story_props(commands: &mut Commands, t: &Terrain, assets: &AssetSer
         Transform::from_translation((c + Vec2::new(6.0, -8.0)).extend(6.6)),
         Visibility::Hidden,
     ));
-    commands.spawn((LevelEntity, RopeLine, Sprite::from_color(Color::srgb(0.72, 0.42, 0.18), Vec2::new(1.0, 2.0)), Transform::from_xyz(0., 0., 9.0), Visibility::Hidden));
 }
 
 type PropQ<'w, 's> = Query<
     'w,
     's,
-    (&'static mut Transform, &'static mut Sprite, &'static mut Visibility, Option<&'static CrossProp>, Option<&'static CoatProp>, Option<&'static CoatMound>, Option<&'static RopeLine>),
-    (Or<(With<CrossProp>, With<CoatProp>, With<CoatMound>, With<RopeLine>)>, Without<Hero>),
+    (&'static mut Transform, &'static mut Sprite, &'static mut Visibility, Option<&'static CrossProp>, Option<&'static CoatProp>, Option<&'static CoatMound>),
+    (Or<(With<CrossProp>, With<CoatProp>, With<CoatMound>)>, Without<Hero>),
 >;
 
 #[allow(clippy::too_many_arguments)]
@@ -261,7 +258,7 @@ pub fn story_system(
     // ---------------------------------------------------------------- props
     let revealed = matches!(story.stage, Stage::Aftermath | Stage::CoatDig | Stage::CoatHold) || (story.stage == Stage::AvSlide && hz.av.is_some_and(|a| a.hit));
     let c = terrain.point(cs);
-    for (mut tr, mut sprite, mut vis, cross, coat, mound, rope) in props.iter_mut() {
+    for (mut tr, mut sprite, mut vis, cross, coat, mound) in props.iter_mut() {
         if cross.is_some() {
             let a = if story.cross_taken { (1.0 - (story.cross_t - 0.7) / 0.6).clamp(0.0, 1.0) } else { 1.0 };
             sprite.color = Color::srgba(1., 1., 1., a);
@@ -281,20 +278,6 @@ pub fn story_system(
             tr.rotation = Quat::from_rotation_z(0.5 * (1.0 - dug));
             let fade = if story.stage == Stage::CoatHold { (1.0 - (story.t - 2.6) / 0.8).clamp(0.0, 1.0) } else { 1.0 };
             sprite.color = Color::srgba(1., 1., 1., fade);
-        }
-        if rope.is_some() {
-            match h.rope {
-                Some(a) if !matches!(h.state, HState::Buried) => {
-                    let pa = terrain.point(a) + Vec2::new(4.0, 26.0);
-                    let pb = h.pos + Vec2::new(0.0, 34.0);
-                    let d = pb - pa;
-                    *vis = Visibility::Visible;
-                    tr.translation = ((pa + pb) / 2.0).extend(9.0);
-                    tr.rotation = Quat::from_rotation_z(d.y.atan2(d.x));
-                    tr.scale = Vec3::new(d.length().max(1.0), 1.0, 1.0);
-                }
-                _ => *vis = Visibility::Hidden,
-            }
         }
     }
 }
@@ -377,6 +360,7 @@ fn state_tag(s: HState) -> &'static str {
         HState::Rise { .. } => "rise",
         HState::Rest => "rest",
         HState::Pause { .. } => "pause",
+        HState::Equip { .. } => "equip",
         HState::Crevasse { .. } => "crevasse",
         HState::Buried => "buried",
         HState::Kneel => "kneel",

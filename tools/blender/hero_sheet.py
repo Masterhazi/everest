@@ -139,7 +139,32 @@ def plan():
                      ("rise_prone", 1, (), None),
                      ("rise_prone", 1, ("axe",), ("arrest", None))]),
         ("walk_tired", [("walk_tired", f, (), None) for f in tired]),
+        # --- v2: ledges, escapes, tools, weather, story
+        ("climb_axe", [("climb_wall", f, ("axe",), None) for f in (1, 13, 25, 37, 49)]),
+        ("mantle", [("mantle", f, (), ("follow", None)) for f in (1, 30, 55, 80, 111)]),
+        ("catch", [("catch_ledge", f, ("axe",), ("follow", None)) for f in (1, 12, 23, 34, 46)]),
+        ("hang", [("hang", f, (), ("follow", None)) for f in (1, 29, 57, 85, 113)]),
+        ("dive", [("dive_roll", f, (), None) for f in (1, 12, 22, 32, 44)]),
+        ("brace", [("brace_in", 1, (), None), ("brace_in", 20, (), None), ("brace_in", 39, (), None),
+                   ("brace", 1, (), None), ("brace", 40, (), None)]),
+        ("swim", [("swim", f, (), None) for f in (1, 28, 55, 82, 110)]),
+        ("cover", [("cover_face", f, (), None) for f in (1, 60, 120, 240, 400)]),
+        ("equip_axe", equip("axe")),
+        ("equip_shovel", equip("shovelgrip")),
+        ("equip_rope", equip("coilhand")),
+        ("wind", [("wind_stagger", f, (), None) for f in (1, 33, 66, 99, 130)]),
+        ("teeter", [("teeter", f, (), None) for f in (1, 12, 23, 34, 45)]),
+        ("dizzy", [("dizzy", f, (), None) for f in (1, 26, 52, 78, 104)]),
+        ("pickup", [("pickup", f, (), None) for f in (1, 50, 90, 130, 200)]),
+        ("cry", [("cry", f, (), None) for f in (1, 40, 80, 120, 160)]),
+        ("sad", [("sad_idle", f, (), None) for f in (1, 18, 35, 52, 69)]),
     ]
+
+
+def equip(tool):
+    """Reach over the shoulder for a tool: on the pack in cols 0-2, in the hand from col 3.
+    The game plays the row backwards to stow it."""
+    return [("equip_shoulder", f, (tool,) if i >= 3 else (), None) for i, f in enumerate((1, 13, 25, 37, 51))]
 
 
 IK_BASE = {"L": Vector((0.05, -0.30, 0.98)), "R": Vector((-0.07, -0.30, 1.02))}
@@ -183,8 +208,14 @@ def frame(spec, path, coat):
         bpy.context.view_layer.update()
     O["Axe"].hide_render = "axe" not in props
     O["Shovel"].hide_render = "shovel" not in props
+    O["ShovelGrip"].hide_render = "shovelgrip" not in props
+    O["CoilHand"].hide_render = "coilhand" not in props
     O["RopeHand"].hide_render = "rope" not in props
     O["RopeCoil"].hide_render = True
+    # tools live on the pack unless they are in his hands
+    O["AxeBag"].hide_render = "axe" in props
+    O["ShovelBag"].hide_render = "shovel" in props or "shovelgrip" in props
+    O["CoilBag"].hide_render = "coilhand" in props
     for n in COAT:
         O[n].hide_render = not coat
     if "rope" in props:
@@ -196,10 +227,15 @@ def frame(spec, path, coat):
     if extra and extra[0] == "arrest":
         axe_point((0, -1, -0.3))
     bpy.context.view_layer.update()
-    # centre on the hips horizontally; the ground stays on the same pixel row in every cell
+    # centre on the hips horizontally; the ground stays on the same pixel row in every cell,
+    # except for ledge rows, where the camera follows him up and the hands mark the ledge
     hp = bone_w("Hips")
     h = ORTHO * CELL[1] / CELL[0]
     cz = h / 2 - (CELL[1] - GROUND_PX) / CELL[1] * h
+    if extra and extra[0] == "follow":
+        cz += hp.z - 0.95
+    META[path] = {"hands": px((bone_w("LeftHand") + bone_w("RightHand")) / 2, hp.y, cz, h),
+                  "hips": px(hp, hp.y, cz, h), "ground_z": round((cz - (h / 2 - (CELL[1] - GROUND_PX) / CELL[1] * h)) * CELL[1] / h, 2)}
     cam = SC.camera
     cam.location = Vector((0, hp.y, cz)) - VIEW * 6
     cam.rotation_euler = VIEW.to_track_quat('-Z', 'Y').to_euler()
@@ -210,13 +246,30 @@ def frame(spec, path, coat):
     ik(False)
 
 
+META = {}
+
+
+def px(p, cy, cz, h):
+    """World point -> cell pixel (x from the left after mirroring so he faces right, y from the top)."""
+    x = CELL[0] / 2 - (p.y - cy) / ORTHO * CELL[0]  # +y (behind him) is left once mirrored
+    y = CELL[1] / 2 - (p.z - cz) / h * CELL[1]
+    return [round(x, 1), round(y, 1)]
+
+
 def render_row(row, out_dir, coat=False):
+    import json
     setup_render()
     name, specs = plan()[row]
     d = os.path.join(out_dir, "coat" if coat else "plain")
     os.makedirs(d, exist_ok=True)
     for col, spec in enumerate(specs):
-        frame(spec, os.path.join(d, f"{row}_{col}.png"), coat)
+        path = os.path.join(d, f"{row}_{col}.png")
+        frame(spec, path, coat)
+        if not coat:
+            mp = os.path.join(out_dir, "meta.json")
+            meta = json.load(open(mp)) if os.path.exists(mp) else {}
+            meta[f"{row}_{col}"] = dict(META[path], row=name)
+            json.dump(meta, open(mp, "w"), indent=0)
     return name
 
 

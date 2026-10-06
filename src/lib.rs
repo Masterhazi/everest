@@ -8,7 +8,9 @@ pub mod controls;
 pub mod fx;
 pub mod hazards;
 pub mod hero;
+pub mod hero_frames;
 pub mod hints;
+pub mod rope;
 pub mod skill;
 pub mod story;
 pub mod terrain;
@@ -56,6 +58,7 @@ pub fn main() {
             controls::ControlsPlugin,
             story::StoryPlugin,
             hero::HeroPlugin,
+            rope::RopePlugin,
             fx::FxPlugin,
         ))
         .add_systems(Startup, hazards::spawn_lamp_mask)
@@ -70,6 +73,7 @@ pub fn main() {
                 skill::skill_system,
                 hints::hints_system,
                 hero::animate_hero,
+                rope::rope_system,
                 fx::mood_system,
                 fx::camera_follow,
                 hazards::hazard_visuals,

@@ -324,7 +324,7 @@ pub fn hazards_system(
         if hz.ice_impact <= 0.0 {
             mood.shake = mood.shake.max(0.3);
             let d = (h.s - hz.ice_target).abs();
-            if d < 38.0 && matches!(h.state, HState::Move | HState::Rest | HState::Pause { .. }) {
+            if d < 38.0 && matches!(h.state, HState::Move | HState::Rest | HState::Pause { .. } | HState::Equip { .. }) {
                 h.stamina -= 12.0;
                 h.start_slide(-90.0);
                 skill.event(-0.06);
@@ -367,7 +367,7 @@ pub fn hazards_system(
             av.front -= 320.0 * dt;
             mood.shake = mood.shake.max(0.25);
             let on_slope = h.s > p0 - 45.0 && h.s < p1 + 4.0; // the runout reaches past the slope
-            if !av.hit && on_slope && av.front <= h.s + 8.0 && matches!(h.state, HState::Move | HState::Rest | HState::Pause { .. } | HState::Crouch) {
+            if !av.hit && on_slope && av.front <= h.s + 8.0 && matches!(h.state, HState::Move | HState::Rest | HState::Pause { .. } | HState::Equip { .. } | HState::Crouch) {
                 av.hit = true;
                 let shelter = av.story && {
                     let bs = terrain.part_s[10] + BOULDER_OFFSET;

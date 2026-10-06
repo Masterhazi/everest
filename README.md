@@ -38,6 +38,11 @@ his axe or his rope stops him. Snow grips, ice barely does, faces don't at all.
 | Rope | clip at an anchor; a fall stops just below it; runs out ~300 px later | fumbles if no anchor nearby |
 | Dig | dig out when buried; uncover the coat | scoop of snow; clanks off ice/rock |
 | Headlamp | light at night | drains the battery in daylight; flickers when low |
+
+Axe, shovel and rope ride on his pack. Tapping one sends his hand over his shoulder for it first
+(about a third of a second); it goes back on the pack once he walks on or stops using it. In an
+emergency (self-arrest while sliding, the crevasse, digging out when buried) it is already in his fist,
+and on an ice face the axe stays in his hand. At the top of a face he hauls himself over the lip.
 | Rest | recover on ground | nothing on a face |
 
 ## Hazards (all announce themselves)

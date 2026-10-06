@@ -3,7 +3,7 @@
   96,
   88
  ],
- "source": "tools/blender/hero_sheet.py + tools/hero_pack.py",
+ "source": "tools/blender/hero_sheet.py + tools/hero_pack.py (row indices and hand/hip points: src/hero_frames.rs)",
  "rows": {
   "idle": {
    "row": 0,
@@ -46,6 +46,76 @@
   },
   "walk_tired": {
    "row": 9,
+   "frames": 5
+  },
+  "climb_axe": {
+   "row": 10,
+   "frames": 5
+  },
+  "mantle": {
+   "row": 11,
+   "frames": 5,
+   "note": "hands stay on the lip (see HANDS in src/hero_frames.rs)"
+  },
+  "catch": {
+   "row": 12,
+   "frames": 5
+  },
+  "hang": {
+   "row": 13,
+   "frames": 5
+  },
+  "dive": {
+   "row": 14,
+   "frames": 5
+  },
+  "brace": {
+   "row": 15,
+   "frames": 5
+  },
+  "swim": {
+   "row": 16,
+   "frames": 5
+  },
+  "cover": {
+   "row": 17,
+   "frames": 5
+  },
+  "equip_axe": {
+   "row": 18,
+   "frames": 5,
+   "note": "tool on the pack in cols 0-2, in hand from col 3; played backwards to stow"
+  },
+  "equip_shovel": {
+   "row": 19,
+   "frames": 5
+  },
+  "equip_rope": {
+   "row": 20,
+   "frames": 5
+  },
+  "wind": {
+   "row": 21,
+   "frames": 5
+  },
+  "teeter": {
+   "row": 22,
+   "frames": 5
+  },
+  "dizzy": {
+   "row": 23,
+   "frames": 5
+  },
+  "pickup": {
+   "row": 24,
+   "frames": 5
+  },
+  "cry": {
+   "row": 25,
+   "frames": 5
+  },
+  "sad": {
+   "row": 26,
    "frames": 5
   }
  }

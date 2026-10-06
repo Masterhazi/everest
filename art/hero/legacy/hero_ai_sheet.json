@@ -3,7 +3,6 @@
   96,
   88
  ],
- "source": "tools/blender/hero_sheet.py + tools/hero_pack.py",
  "rows": {
   "idle": {
    "row": 0,
@@ -27,8 +26,7 @@
   },
   "dig": {
    "row": 5,
-   "frames": 5,
-   "note": "cols 0-3 crouch/scoop/clank/scoop, col 4 probe with the axe"
+   "frames": 4
   },
   "exhausted": {
    "row": 6,
@@ -36,17 +34,11 @@
   },
   "fall": {
    "row": 7,
-   "frames": 5,
-   "note": "col 2 rolling onto the stomach, col 3 face down"
+   "frames": 4
   },
   "injured": {
    "row": 8,
-   "frames": 5,
-   "note": "cols 0-3 rise (3 = face down), col 4 self-arrest"
-  },
-  "walk_tired": {
-   "row": 9,
-   "frames": 5
+   "frames": 4
   }
  }
 }

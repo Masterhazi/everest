@@ -110,23 +110,29 @@ impl Hero {
     }
 }
 
-#[derive(Component)]
-pub struct CoatRoll;
+/// The two sprite sheets: the same frames with and without the friend's coat strapped to the pack.
+#[derive(Resource)]
+pub struct HeroSheets {
+    plain: Handle<Image>,
+    coat: Handle<Image>,
+}
 
 pub const HERO_SCALE: f32 = 0.95;
 const PULL: f32 = 34.0;
 const G: f32 = 520.0;
 
-// atlas rows (see tools/slice.py)
+// atlas rows (rendered by tools/blender/hero_sheet.py, packed by tools/hero_pack.py)
 const IDLE: usize = 0;
 const WALK: usize = 1;
 const CLIMB: usize = 2;
 const AXE: usize = 3;
 const ROPE: usize = 4;
-const DIG: usize = 5;
+const DIG: usize = 5; // col 4: probing snow with the axe
 const EXH: usize = 6;
 const FALL: usize = 7;
-const INJ: usize = 8;
+const INJ: usize = 8; // col 4: self-arrest, face down on the axe
+const WALK_TIRED: usize = 9;
+const ROWS: u32 = 10;
 fn cell(row: usize, col: usize) -> usize {
     row * 5 + col.min(4)
 }
@@ -139,13 +145,14 @@ impl Plugin for HeroPlugin {
 }
 
 fn spawn_hero(mut commands: Commands, assets: Res<AssetServer>, mut layouts: ResMut<Assets<TextureAtlasLayout>>) {
-    let layout = layouts.add(TextureAtlasLayout::from_grid(UVec2::new(96, 88), 5, 9, None, None));
+    let layout = layouts.add(TextureAtlasLayout::from_grid(UVec2::new(96, 88), 5, ROWS, None, None));
+    let sheets = HeroSheets { plain: assets.load("sprites/hero.png"), coat: assets.load("sprites/hero_coat.png") };
     commands.spawn((
         Hero::default(),
-        Sprite { image: assets.load("sprites/hero.png"), texture_atlas: Some(TextureAtlas { layout, index: 0 }), anchor: Anchor::BottomCenter, ..default() },
+        Sprite { image: sheets.plain.clone(), texture_atlas: Some(TextureAtlas { layout, index: 0 }), anchor: Anchor::BottomCenter, ..default() },
         Transform::from_xyz(0.0, 0.0, 10.0).with_scale(Vec3::splat(HERO_SCALE)),
     ));
-    commands.spawn((CoatRoll, Sprite::from_color(Color::srgb(0.86, 0.68, 0.2), Vec2::new(17.0, 8.0)), Transform::from_xyz(0., 0., 10.5), Visibility::Hidden));
+    commands.insert_resource(sheets);
 }
 
 fn friction(surf: Surface) -> f32 {
@@ -492,8 +499,8 @@ pub fn animate_hero(
     mut last_idx: Local<usize>,
     time: Res<Time>,
     terrain: Res<Terrain>,
-    mut q: Query<(&Hero, &mut Sprite, &mut Transform, &mut Visibility), Without<CoatRoll>>,
-    mut roll: Query<(&mut Transform, &mut Visibility), With<CoatRoll>>,
+    sheets: Res<HeroSheets>,
+    mut q: Query<(&Hero, &mut Sprite, &mut Transform, &mut Visibility)>,
 ) {
     let Ok((h, mut s, mut t, mut vis)) = q.single_mut() else { return };
     let f = |rate: f32, n: usize| ((h.anim_t * rate) as usize) % n;
@@ -506,12 +513,13 @@ pub fn animate_hero(
                 cell(CLIMB, f(6.0, 5))
             }
         }
+        HState::Move if h.moving && h.stamina < 30.0 => cell(WALK_TIRED, f(7.0, 5)),
         HState::Move if h.moving => cell(WALK, f(9.0, 5)),
         HState::Move if h.stamina < 30.0 => cell(EXH, 0),
         HState::Move => cell(IDLE, 0),
         HState::Slide { v, .. } => {
             if h.arrest {
-                cell(INJ, 2)
+                cell(INJ, 4)
             } else {
                 cell(FALL, if v.abs() < 120.0 { 1 } else { 2 })
             }
@@ -520,7 +528,7 @@ pub fn animate_hero(
         HState::Rise { t } => cell(INJ, 3 - ((t / 1.3) * 3.0).min(3.0) as usize),
         HState::Rest => cell(EXH, 2),
         HState::Pause { act, .. } => match act {
-            Act::Probe => cell(AXE, 4),
+            Act::Probe => cell(DIG, 4),
             Act::Scoop => cell(DIG, 1),
             Act::Clank => cell(DIG, 2),
             Act::Fumble => cell(ROPE, 2),
@@ -537,7 +545,7 @@ pub fn animate_hero(
     }
     // footsteps that sound like what he's standing on; hands and boots on rock while climbing
     if idx != *last_idx {
-        let foot = idx == cell(WALK, 1) || idx == cell(WALK, 3);
+        let foot = [WALK, WALK_TIRED].iter().any(|&r| idx == cell(r, 1) || idx == cell(r, 3));
         let hand = g.wall && g.surf == Surface::Rock && (idx == cell(CLIMB, 0) || idx == cell(CLIMB, 2));
         if foot || hand {
             let set = match g.surf {
@@ -561,11 +569,9 @@ pub fn animate_hero(
     t.translation = Vec3::new(h.pos.x, h.pos.y, 10.0);
     t.scale = Vec3::new(HERO_SCALE, HERO_SCALE * breathe, 1.0);
     *vis = if h.state == HState::Buried { Visibility::Hidden } else { Visibility::Visible };
-
-    if let Ok((mut rt, mut rv)) = roll.single_mut() {
-        let show = h.carrying_coat && !matches!(h.state, HState::Buried | HState::Down { .. } | HState::Slide { .. } | HState::Crevasse { .. });
-        *rv = if show { Visibility::Visible } else { Visibility::Hidden };
-        let up = if matches!(h.state, HState::Rest | HState::Sit | HState::Kneel | HState::Pause { .. }) { 38.0 } else { 56.0 };
-        rt.translation = Vec3::new(h.pos.x - h.facing * 9.0, h.pos.y + up * HERO_SCALE * breathe, 10.5);
+    // once he carries the coat it is strapped to his pack in every frame
+    let sheet = if h.carrying_coat { &sheets.coat } else { &sheets.plain };
+    if s.image != *sheet {
+        s.image = sheet.clone();
     }
 }

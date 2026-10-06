@@ -4,3 +4,6 @@
 /deliver
 *.log
 /private_audio
+*.blend1
+art/hero/mixamo/
+art/hero/hero.blend
